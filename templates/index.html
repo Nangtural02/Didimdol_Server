@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UWB Sensor Live Monitor</title>
+    <style>
+        body { font-family: monospace; background-color: #1e1e1e; color: #d4d4d4; }
+        #log { width: 95%; height: 80vh; overflow-y: scroll; border: 1px solid #333; padding: 10px; }
+        #status { color: #4ec9b0; }
+    </style>
+</head>
+<body>
+    <h1>UWB Sensor Live Data</h1>
+    <p>Status: <span id="status">Connecting...</span></p>
+    <pre id="log"></pre>
+
+    <script>
+        const logElement = document.getElementById('log');
+        const statusElement = document.getElementById('status');
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${wsProtocol}//${window.location.host}/ws_debug`;
+        let ws;
+
+        function connect() {
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                statusElement.textContent = 'Connected';
+                statusElement.style.color = '#4ec9b0';
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                const logLine = document.createElement('div');
+                logLine.textContent = JSON.stringify(data, null, 2);
+                logElement.appendChild(logLine);
+                // 자동 스크롤
+                logElement.scrollTop = logElement.scrollHeight;
+            };
+
+            ws.onclose = () => {
+                statusElement.textContent = 'Disconnected. Retrying in 3 seconds...';
+                statusElement.style.color = '#f44747';
+                setTimeout(connect, 3000); // 3초 후 재연결 시도
+            };
+
+            ws.onerror = (error) => {
+                console.error('WebSocket Error:', error);
+                ws.close();
+            };
+        }
+
+        connect();
+    </script>
+</body>
+</html>

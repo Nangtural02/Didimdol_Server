@@ -1,0 +1,157 @@
+import asyncio
+import json
+import datetime as dt
+from pathlib import Path
+from dataclasses import asdict
+from quart import Blueprint, websocket, render_template
+
+from global_queues import LOGGING_QUEUE, RAW_DATA_QUEUE, sensor_websockets, app_websockets, debug_websockets, is_processing_active, is_first_entry_in_file
+from data_models import SensorData
+
+bp = Blueprint('main_endpoints', __name__)
+
+def parse_sensor_data(s: str) -> SensorData | None:
+    """ 디버깅용 파서 """
+    if not s or not s.strip(): return None
+    original_message = s
+    if s.startswith('{') and s.endswith('}'): s = s[1:-1]
+    p = [x.strip() for x in s.split(",")]
+    if len(p) != 2:
+        print(f"[Parser] Invalid packet length: {len(p)}. Content: '{original_message}'")
+        return None
+    try:
+        return SensorData(
+            p[0], int(p[1])
+        )
+    except (ValueError, IndexError) as e:
+        print(f"[Parser] Error parsing packet: {e}. Content: '{original_message}'")
+        return None
+
+# def parse_sensor_data(s: str) -> SensorData | None:
+#     """수신된 문자열을 파싱하여 SensorData 객체를 반환합니다."""
+#     if not s or not s.strip(): return None
+#     original_message = s
+#     if s.startswith('{') and s.endswith('}'): s = s[1:-1]
+#     p = [x.strip() for x in s.split(",")]
+#     if len(p) != 12:
+#         print(f"[Parser] Invalid packet length: {len(p)}. Content: '{original_message}'")
+#         return None
+#     try:
+#         return SensorData(
+#             Timestamp=asyncio.get_running_loop().time(),
+#             TagAddr=int(p[0]), Seq=int(p[1]), Distance=float(p[2]),
+#             ax=int(p[3]), ay=int(p[4]), az=int(p[5]),
+#             gx=int(p[6]), gy=int(p[7]), gz=int(p[8]),
+#             mx=int(p[9]), my=int(p[10]), mz=int(p[11])
+#         )
+#     except (ValueError, IndexError) as e:
+#         print(f"[Parser] Error parsing packet: {e}. Content: '{original_message}'")
+#         return None
+
+async def broadcast(data: str, clients: set):
+    tasks = [client.send(data) for client in clients]
+    await asyncio.gather(*tasks, return_exceptions=True)
+
+@bp.websocket('/sensor')
+async def sensor_handler():
+    """수신된 데이터를 is_processing_active 상태에 따라 처리하거나 버립니다."""
+    client = websocket._get_current_object()
+    sensor_websockets.add(client)
+    try:
+        while True:
+            message = await client.receive()
+            parsed_data = parse_sensor_data(message)
+
+            if parsed_data:
+                # ✅ [핵심] 처리 활성화 상태일 때만 데이터를 큐에 넣습니다.
+                if is_processing_active:
+                    await asyncio.gather(
+                        RAW_DATA_QUEUE.put(parsed_data),
+                        LOGGING_QUEUE.put(parsed_data)
+                    )
+                # else:  # 처리 비활성화 상태이면 데이터를 버립니다. (아무것도 안 함)
+
+                # 디버깅 UI는 항상 데이터를 볼 수 있도록 그대로 둡니다.
+                await broadcast(json.dumps(asdict(parsed_data)), debug_websockets)
+    finally:
+        sensor_websockets.remove(client)
+
+
+@bp.websocket('/app')
+async def app_handler():
+    """앱 클라이언트의 처리 시작/중단 제어 명령을 수신합니다."""
+    global is_processing_active, log_file_handler, log_file_path, is_first_entry_in_file
+    client = websocket._get_current_object()
+    app_websockets.add(client)
+    try:
+        while True:
+            message = await client.receive()
+            try:
+                command = json.loads(message)
+                print(f"[App WS] Received command: {command}")
+
+                # ✅ "start_processing" 명령 처리
+                if command.get("command") == "start_processing":
+                    if is_processing_active:
+                        await client.send(json.dumps({"status": "error", "message": "Already processing."}))
+                        continue
+
+                    is_processing_active = True
+                    is_first_entry_in_file = True
+                    # 파일 열기 로직은 동일
+                    log_dir = Path("./log");
+                    log_dir.mkdir(exist_ok=True)
+                    now_str = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = f"{command.get('user', 'unknown')}_{command.get('session', '1')}_{now_str}.json"
+                    log_file_path = log_dir / filename
+                    log_file_handler = log_file_path.open("w", encoding="utf-8")
+                    log_file_handler.write("[\n")
+
+                    print(f"Processing started. Logging to: {log_file_path}")
+                    await client.send(json.dumps({"status": "processing_started"}))
+
+                # ✅ "stop_processing" 명령 처리
+                elif command.get("command") == "stop_processing":
+                    if not is_processing_active:
+                        await client.send(json.dumps({"status": "error", "message": "Not processing."}))
+                        continue
+
+                    is_processing_active = False
+                    # 파일 닫기 로직은 동일
+                    if log_file_handler:
+                        if not is_first_entry_in_file:
+                            log_file_handler.seek(log_file_handler.tell() - 2)
+                        log_file_handler.write("\n]\n")
+                        log_file_handler.close()
+
+                        print(f"Processing stopped. Log file saved: {log_file_path}")
+                        await client.send(json.dumps({"status": "processing_stopped", "file": str(log_file_path)}))
+
+                    log_file_handler = None
+                    log_file_path = None
+
+            except Exception as e:
+                print(f"[App WS] Error processing command: {e}")
+
+    finally:
+        # 앱 연결이 끊기면 안전하게 처리 중단
+        if is_processing_active:
+            is_processing_active = False
+            if log_file_handler:
+                log_file_handler.close()
+            print(f"[App WS] Client disconnected, forcefully stopped processing.")
+        app_websockets.remove(client)
+@bp.websocket('/ws_debug')
+async def debug_handler():
+    try:
+        await websocket.accept()
+        client = websocket._get_current_object()
+        debug_websockets.add(client)
+        await asyncio.Future()
+    finally:
+        if 'client' in locals() and client in debug_websockets:
+            debug_websockets.remove(client)
+
+@bp.route('/')
+async def index():
+    return await render_template("index.html")

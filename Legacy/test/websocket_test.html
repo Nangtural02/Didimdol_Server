@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>WebSocket Echo Test</title>
+</head>
+<body>
+    <h1>WebSocket Echo Client</h1>
+    <input type="text" id="messageInput" placeholder="Enter message..." />
+    <button onclick="sendMessage()">Send</button>
+    <h2>Log:</h2>
+    <div id="log" style="border: 1px solid #ccc; padding: 10px; height: 300px; overflow-y: scroll;"></div>
+
+    <script>
+        const logDiv = document.getElementById('log');
+        const messageInput = document.getElementById('messageInput');
+
+        // 여기에 서버의 IP 주소와 포트를 입력하세요
+        const ws = new WebSocket(`ws://202.30.29.212:5050`);
+        // const ws = new WebSocket(`ws://192.168.0.2:5050`);
+        function log(message) {
+            logDiv.innerHTML += `<p>${message}</p>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        ws.onopen = function(event) {
+            log("INFO: Connection opened.");
+        };
+
+        ws.onmessage = function(event) {
+            log(`SERVER: ${event.data}`);
+        };
+
+        ws.onclose = function(event) {
+            log("INFO: Connection closed.");
+        };
+
+        ws.onerror = function(event) {
+            log("ERROR: An error occurred.");
+            console.error("WebSocket Error:", event);
+        };
+
+        function sendMessage() {
+            const message = messageInput.value;
+            if (message) {
+                log(`CLIENT: ${message}`);
+                ws.send(message);
+                messageInput.value = '';
+            }
+        }
+
+        // Enter 키로도 메시지 전송
+        messageInput.addEventListener("keyup", function(event) {
+            if (event.key === "Enter") {
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>
