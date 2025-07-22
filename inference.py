@@ -7,7 +7,8 @@ from data_models import SquatSegment, InferenceResult, SensorData
 
 async def run_ai_inference_placeholder(data_segment: list[SensorData]) -> InferenceResult:
     """
-    AI 모델을 대체하는 스켈레톤 함수. 랜덤한 InferenceResult 객체를 생성합니다.
+    todo: AI 모델 추론 함수
+    AI 모델 추론 함수 스켈레톤. 지금은 랜덤한 InferenceResult 객체를 생성합니다.
     """
     head_status = random.choice([0, 1, 2])
     spine_status = random.choice([0, 1, 2])
@@ -25,7 +26,8 @@ async def run_ai_inference_placeholder(data_segment: list[SensorData]) -> Infere
 
 
 async def inference_worker():
-    """[파이프라인 3단계] SEGMENT_QUEUE에서 데이터를 꺼내 AI 추론 후 RESULT_QUEUE에 넣습니다."""
+    """[파이프라인 3단계] SEGMENT_QUEUE에서 데이터를 꺼내 AI 추론하는 함수 호출 후,
+     결과를 RESULT_QUEUE에 넣습니다."""
     print("[Inference] 추론 워커 시작됨.")
     while True:
         squat_event: SquatSegment = await SEGMENT_QUEUE.get()

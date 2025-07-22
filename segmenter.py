@@ -18,6 +18,8 @@ async def repetition_segmenter():
         start_time = first_data_point.Timestamp
         RAW_DATA_QUEUE.task_done()
 
+        #todo: 분할 로직
+        #지금은 그냥 100개 되면 잘라서 넘기는걸로 되어있습니다.
         for _ in range(99):
             data_point = await RAW_DATA_QUEUE.get()
             segment_data.append(data_point)
@@ -29,5 +31,8 @@ async def repetition_segmenter():
             start_timestamp=start_time,
             data=segment_data
         )
+
+
+
         await SEGMENT_QUEUE.put(squat_event)
         print(f"[Segmenter] {rep_count}번째 동작(SquatSegment)을 SEGMENT_QUEUE에 추가함.")
