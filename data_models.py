@@ -1,32 +1,32 @@
 from dataclasses import dataclass, field
 from typing import List, Dict, Any
 
-@dataclass
-class SensorData:
-    """
-    디버깅용 센서데이터
-    """
-    message: str
-    Timestamp: int
-
 # @dataclass
 # class SensorData:
 #     """
-#     앵커에서 서버로 들어오는 데이터 양식
+#     디버깅용 센서데이터
 #     """
-#     Timestamp: float
-#     TagAddr: int
-#     Seq: int
-#     Distance: float
-#     ax: int
-#     ay: int
-#     az: int
-#     gx: int
-#     gy: int
-#     gz: int
-#     mx: int
-#     my: int
-#     mz: int
+#     message: str
+#     Timestamp: int
+
+@dataclass
+class SensorData:
+    """
+    앵커에서 서버로 들어오는 데이터 양식
+    """
+    Timestamp: float
+    TagAddr: int
+    Seq: int
+    Distance: float
+    ax: float
+    ay: float
+    az: float
+    gx: float
+    gy: float
+    gz: float
+    mx: float
+    my: float
+    mz: float
 
 @dataclass
 class SquatSegment:
@@ -35,7 +35,7 @@ class SquatSegment:
     """
     repetition_count: int
     start_timestamp: float
-    data: List[Dict[str, Any]] = field(default_factory=list)
+    data: List[SensorData] = field(default_factory=list)
 
 @dataclass
 class InferenceResult:

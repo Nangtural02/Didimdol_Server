@@ -1,6 +1,7 @@
 import asyncio
 import sys
 import argparse
+import logging
 from quart import Quart
 from endpoints import bp as main_blueprint
 from segmenter import repetition_segmenter
@@ -45,4 +46,11 @@ async def startup():
 if __name__ == '__main__':
     if sys.platform == "win32":
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+    access_logger = logging.getLogger("hypercorn.access")
+    access_logger.setLevel(logging.DEBUG)
+
+    error_logger = logging.getLogger("hypercorn.error")
+    error_logger.setLevel(logging.DEBUG)
+
+    # 서버 실행
     app.run(host='0.0.0.0', port=5050, debug=True)
