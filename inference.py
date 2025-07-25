@@ -90,6 +90,7 @@ class SquatPoseModel(nn.Module):
 # -------------------- 모델 로드 및 초기 설정 --------------------
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 MODEL_PATH = "squat_model.pth"  # 훈련된 모델 파일
+
 # 모델 인스턴스 생성 및 가중치 로드
 try:
     print("[Inference] AI 모델 로딩을 시작합니다...")
@@ -104,7 +105,6 @@ except FileNotFoundError:
 except Exception as e:
     print(f"[Inference] [ERROR] 모델 로딩 중 오류 발생: {e}")
     model = None
-print("[Inference] 추론 워커 시작됨.")
 
 def preprocess_data(data_segment: list[SensorData]) -> torch.Tensor:
     """
@@ -214,6 +214,7 @@ async def run_ai_inference_placeholder(data_segment: list[SensorData]) -> Infere
 async def inference_worker():
     """[파이프라인 3단계] SEGMENT_QUEUE에서 데이터를 꺼내 AI 추론하는 함수 호출 후,
      결과를 RESULT_QUEUE에 넣습니다."""
+    print("[Inference] 추론 워커 시작됨.")
     while True:
         squat_event: SquatSegment = await SEGMENT_QUEUE.get()
         print(f"[Inference] {squat_event.repetition_count}번째 동작 추론 시작...")
