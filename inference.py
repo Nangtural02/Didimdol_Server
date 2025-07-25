@@ -1,5 +1,4 @@
 import asyncio
-from pyexpat import model
 import torch
 import torch.nn as nn
 from torch.autograd import Function
@@ -10,6 +9,9 @@ from math import floor, ceil
 from global_queues import SEGMENT_QUEUE, RESULT_QUEUE
 from data_models import SquatSegment, InferenceResult, SensorData
 from collections import defaultdict # 그룹화를 위해 import
+model = None
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+MODEL_PATH = "squat_model.pth"  # 훈련된 모델 파일
 
 # -------------------- GRL --------------------
 class GradientReversalFunction(Function):
@@ -87,25 +89,6 @@ class SquatPoseModel(nn.Module):
         rev_feats = [grad_reverse(f, lambd) for f in feats]
         domain_output = self.domain_classifier(rev_feats)
         return task_outputs, domain_output
-
-# -------------------- 모델 로드 및 초기 설정 --------------------
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-MODEL_PATH = "squat_model.pth" # 훈련된 모델 파일
-
-# 모델 인스턴스 생성 및 가중치 로드
-try:
-    print("[Inference] AI 모델 로딩을 시작합니다...")
-    model = SquatPoseModel(feat_dim=128, num_domains=6)
-    model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
-    model.to(DEVICE)
-    model.eval()  # 모델을 추론 모드로 설정
-    print(f"[Inference] AI 모델 로딩 완료. 추론 장치: {DEVICE}")
-except FileNotFoundError:
-    print(f"[Inference] [ERROR] 모델 파일을 찾을 수 없습니다: {MODEL_PATH}")
-    model = None
-except Exception as e:
-    print(f"[Inference] [ERROR] 모델 로딩 중 오류 발생: {e}")
-    model = None
 
 def preprocess_data(data_segment: list[SensorData]) -> torch.Tensor:
     """
@@ -214,6 +197,22 @@ async def run_ai_inference_placeholder(data_segment: list[SensorData]) -> Infere
 async def inference_worker():
     """[파이프라인 3단계] SEGMENT_QUEUE에서 데이터를 꺼내 AI 추론하는 함수 호출 후,
      결과를 RESULT_QUEUE에 넣습니다."""
+    # -------------------- 모델 로드 및 초기 설정 --------------------
+    global model
+    # 모델 인스턴스 생성 및 가중치 로드
+    try:
+        print("[Inference] AI 모델 로딩을 시작합니다...")
+        model = SquatPoseModel(feat_dim=128, num_domains=7)
+        model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
+        model.to(DEVICE)
+        model.eval()  # 모델을 추론 모드로 설정
+        print(f"[Inference] AI 모델 로딩 완료. 추론 장치: {DEVICE}")
+    except FileNotFoundError:
+        print(f"[Inference] [ERROR] 모델 파일을 찾을 수 없습니다: {MODEL_PATH}")
+        model = None
+    except Exception as e:
+        print(f"[Inference] [ERROR] 모델 로딩 중 오류 발생: {e}")
+        model = None
     print("[Inference] 추론 워커 시작됨.")
     while True:
         squat_event: SquatSegment = await SEGMENT_QUEUE.get()

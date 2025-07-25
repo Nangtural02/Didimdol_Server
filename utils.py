@@ -31,9 +31,9 @@ def parse_sensor_data(s: str) -> SensorData | None:
         return SensorData(
             Timestamp=asyncio.get_running_loop().time(),
             TagAddr=int(p[0]), Seq=int(p[1]), Distance=float(p[2]),
-            ax=int(p[3]), ay=int(p[4]), az=int(p[5]),
-            gx=int(p[6]), gy=int(p[7]), gz=int(p[8]),
-            mx=int(p[9]), my=int(p[10]), mz=int(p[11])
+            ax=float(p[3]), ay=float(p[4]), az=float(p[5]),
+            gx=float(p[6]), gy=float(p[7]), gz=float(p[8]),
+            mx=float(p[9]), my=float(p[10]), mz=float(p[11])
         )
     except (ValueError, IndexError) as e:
         print(f"[Parser] Error parsing packet: {e}. Content: '{original_message}'")

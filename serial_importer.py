@@ -4,7 +4,8 @@ import serial.tools.list_ports
 from dataclasses import asdict
 import json
 
-from global_queues import RAW_DATA_QUEUE, LOGGING_QUEUE, is_processing_active, debug_websockets
+import global_queues
+from global_queues import RAW_DATA_QUEUE, LOGGING_QUEUE, debug_websockets
 from utils import parse_sensor_data
 from endpoints import broadcast  # endpoints에서 broadcast 함수를 가져옴
 
@@ -45,7 +46,15 @@ def blocking_serial_reader(port: str, loop: asyncio.AbstractEventLoop):
 
     while True:
         try:
-            line = ser.readline()
+            # ✅ 수정: readline() 대신 read_until() 사용
+            # '}' 문자를 만날 때까지 데이터를 읽어들입니다.
+            line = ser.read_until(b'}')
+
+            # # ✅ [디버깅] 실제로 읽은 바이트를 그대로 출력해봅니다.
+            # if line:
+            #     print(f"[Serial Importer-DEBUG] Raw bytes received: {line}")
+
+            # 읽은 데이터가 있을 경우에만 처리
             if not line:
                 continue
 
@@ -67,9 +76,16 @@ async def process_serial_line(line: str):
     """
     메인 이벤트 루프에서 실행되는 함수. 파싱 및 큐에 데이터를 넣습니다.
     """
+    # # ✅ [디버깅] 파싱하기 직전의 문자열을 출력합니다.
+    # print(f"[Serial Importer-DEBUG] Processing line: '{line.strip()}'")
+
     parsed_data = parse_sensor_data(line.strip())
+
+    # ✅ [디버깅] 파싱 결과를 출력합니다. (이전과 동일)
+    # print(f"[Serial Importer-DEBUG] Parsed data: {parsed_data}")
+
     if parsed_data:
-        if is_processing_active:
+        if global_queues.is_processing_active:
             await asyncio.gather(
                 RAW_DATA_QUEUE.put(parsed_data),
                 LOGGING_QUEUE.put(parsed_data)

@@ -5,8 +5,8 @@ from pathlib import Path
 from dataclasses import asdict
 from quart import Blueprint, websocket, render_template
 from utils import parse_sensor_data
-
-from global_queues import LOGGING_QUEUE, RAW_DATA_QUEUE, sensor_websockets, app_websockets, debug_websockets, is_processing_active, is_first_entry_in_file
+import global_queues
+from global_queues import LOGGING_QUEUE, RAW_DATA_QUEUE, sensor_websockets, app_websockets, debug_websockets
 from data_models import SensorData
 
 bp = Blueprint('main_endpoints', __name__)
@@ -27,7 +27,7 @@ async def sensor_handler():
 
             if parsed_data:
                 # ✅ [핵심] 처리 활성화 상태일 때만 데이터를 큐에 넣습니다.
-                if is_processing_active:
+                if global_queues.is_processing_active:
                     await asyncio.gather(
                         RAW_DATA_QUEUE.put(parsed_data),
                         LOGGING_QUEUE.put(parsed_data)
@@ -43,7 +43,6 @@ async def sensor_handler():
 @bp.websocket('/app')
 async def app_handler():
     """앱 클라이언트의 처리 시작/중단 제어 명령을 수신합니다."""
-    global is_processing_active, log_file_handler, log_file_path, is_first_entry_in_file
     client = websocket._get_current_object()
     app_websockets.add(client)
     try:
@@ -55,12 +54,12 @@ async def app_handler():
 
                 # ✅ "start_processing" 명령 처리
                 if command.get("command") == "start_processing":
-                    if is_processing_active:
+                    if global_queues.is_processing_active:
                         await client.send(json.dumps({"status": "error", "message": "Already processing."}))
                         continue
 
-                    is_processing_active = True
-                    is_first_entry_in_file = True
+                    global_queues.is_processing_active = True
+                    global_queues.is_first_entry_in_file = True
                     # 파일 열기 로직은 동일
                     log_dir = Path("./log");
                     log_dir.mkdir(exist_ok=True)
@@ -75,19 +74,19 @@ async def app_handler():
 
                 # ✅ "stop_processing" 명령 처리
                 elif command.get("command") == "stop_processing":
-                    if not is_processing_active:
+                    if not global_queues.is_processing_active:
                         await client.send(json.dumps({"status": "error", "message": "Not processing."}))
                         continue
 
                     is_processing_active = False
                     # 파일 닫기 로직은 동일
-                    if log_file_handler:
-                        if not is_first_entry_in_file:
-                            log_file_handler.seek(log_file_handler.tell() - 2)
-                        log_file_handler.write("\n]\n")
-                        log_file_handler.close()
+                    if global_queues.log_file_handler:
+                        if not global_queues.is_first_entry_in_file:
+                            global_queues.log_file_handler.seek(global_queues.log_file_handler.tell() - 2)
+                        global_queues.log_file_handler.write("\n]\n")
+                        global_queues.log_file_handler.close()
 
-                        print(f"Processing stopped. Log file saved: {log_file_path}")
+                        print(f"Processing stopped. Log file saved: {global_queues.log_file_path}")
                         await client.send(json.dumps({"status": "processing_stopped", "file": str(log_file_path)}))
 
                     log_file_handler = None
@@ -98,10 +97,10 @@ async def app_handler():
 
     finally:
         # 앱 연결이 끊기면 안전하게 처리 중단
-        if is_processing_active:
+        if global_queues.is_processing_active:
             is_processing_active = False
-            if log_file_handler:
-                log_file_handler.close()
+            if global_queues.log_file_handler:
+                global_queues.log_file_handler.close()
             print(f"[App WS] Client disconnected, forcefully stopped processing.")
         app_websockets.remove(client)
 @bp.websocket('/ws_debug')
