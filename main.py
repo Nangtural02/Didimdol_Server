@@ -9,12 +9,19 @@ from inference import inference_worker
 from result_to_app import result_emitter
 from logger import file_logging_worker
 from serial_importer import serial_data_importer
+from log_replayer import log_file_replayer
 
 parser = argparse.ArgumentParser(description="UWB 스쿼트 트레이너 서버")
-parser.add_argument(
+input_mode = parser.add_mutually_exclusive_group() # ✅ 여러 모드 중 하나만 선택 가능
+input_mode.add_argument(
     "--use-serial",
-    action="store_true", # 이 플래그가 있으면 True가 됨
+    action="store_true",
     help="WebSocket 대신 시리얼 포트에서 데이터를 입력받습니다."
+)
+input_mode.add_argument(
+    "--replay-log",
+    action="store_true",
+    help="저장된 로그 파일을 재생하여 데이터를 입력받습니다."
 )
 args = parser.parse_args()
 # --- Quart 앱 생성 및 설정 ---
@@ -33,6 +40,9 @@ async def startup():
     if args.use_serial:
         print(">> 시리얼 포트 입력 모드로 실행합니다.")
         app.add_background_task(serial_data_importer)
+    elif args.replay_log:
+        print(">> 입력 모드: 로그 파일 재생")
+        app.add_background_task(log_file_replayer)
     else:
         print(">> WebSocket 입력 모드로 실행합니다. (기본값)")
 
