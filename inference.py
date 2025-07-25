@@ -183,7 +183,7 @@ async def run_ai_inference_placeholder(data_segment: list[SensorData]) -> Infere
 
     # 1. 데이터 전처리
     input_tensor = preprocess_data(data_segment)
-    input_tensor = input_tensor.unsqueeze(0) # <-- 이 한 줄을 추가하는 것이 핵심입니다.
+    input_tensor = input_tensor.unsqueeze(0)
     input_tensor = input_tensor.to(DEVICE)
 
     # 2. 모델 추론 실행 (그래디언트 계산 비활성화)
