@@ -11,6 +11,10 @@ debug_websockets = set()
 
 is_processing_active = False
 
+START_REPLAY_EVENT = asyncio.Event()
+
 log_file_handler = None
 log_file_path = None
 is_first_entry_in_file = True
+
+server_operating_mode = "Normal"

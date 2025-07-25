@@ -3,6 +3,8 @@ import sys
 import argparse
 import logging
 from quart import Quart
+
+import global_queues
 from endpoints import bp as main_blueprint
 from segmenter import repetition_segmenter
 from inference import inference_worker
@@ -40,11 +42,14 @@ async def startup():
     if args.use_serial:
         print(">> 시리얼 포트 입력 모드로 실행합니다.")
         app.add_background_task(serial_data_importer)
+        global_queues.server_operating_mode = "serial"
     elif args.replay_log:
         print(">> 입력 모드: 로그 파일 재생")
         app.add_background_task(log_file_replayer)
+        global_queues.server_operating_mode = "replay"
     else:
         print(">> WebSocket 입력 모드로 실행합니다. (기본값)")
+        global_queues.server_operating_mode = "normal"
 
     app.add_background_task(file_logging_worker)
     app.add_background_task(repetition_segmenter)
