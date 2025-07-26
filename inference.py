@@ -214,6 +214,7 @@ async def run_ai_inference_placeholder(data_segment: list[SensorData]) -> Infere
 async def inference_worker():
     """[파이프라인 3단계] SEGMENT_QUEUE에서 데이터를 꺼내 AI 추론하는 함수 호출 후,
      결과를 RESULT_QUEUE에 넣습니다."""
+
     print("[Inference] 추론 워커 시작됨.")
     while True:
         squat_event: SquatSegment = await SEGMENT_QUEUE.get()
