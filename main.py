@@ -12,6 +12,8 @@ from result_to_app import result_emitter
 from logger import file_logging_worker
 from serial_importer import serial_data_importer
 from log_replayer import log_file_replayer
+from manual_segmenter import manual_repetition_collector
+from csv_logger import csv_result_logger
 
 parser = argparse.ArgumentParser(description="UWB 스쿼트 트레이너 서버")
 input_mode = parser.add_mutually_exclusive_group() # ✅ 여러 모드 중 하나만 선택 가능
@@ -25,37 +27,58 @@ input_mode.add_argument(
     action="store_true",
     help="저장된 로그 파일을 재생하여 데이터를 입력받습니다."
 )
+input_mode.add_argument(
+    "--model-test",
+    action="store_true",
+    help="수동 모델 평가 모드를 실행합니다 (시리얼 입력 필요)."
+)
 args = parser.parse_args()
 # --- Quart 앱 생성 및 설정 ---
 app = Quart(__name__, template_folder='templates')
 app.register_blueprint(main_blueprint)
 
-# --- 서버 시작/종료 이벤트 핸들러 ---
+
 @app.before_serving
 async def startup():
-    """
-    서버 시작 시 모든 백그라운드 파이프라인 워커들을 실행합니다.
-    """
+    """서버 시작 시 모드에 맞는 백그라운드 워커들을 실행합니다."""
     print("서버 시작... 백그라운드 워커를 실행합니다.")
 
-    # ✅ --use-serial 플래그가 있을 때만 시리얼 임포터 실행
+    # --- 입력 소스 워커 설정 ---
     if args.use_serial:
-        print(">> 시리얼 포트 입력 모드로 실행합니다.")
-        app.add_background_task(serial_data_importer)
         global_queues.server_operating_mode = "serial"
+        print(">> 입력 모드: 시리얼 포트")
+        app.add_background_task(serial_data_importer)
     elif args.replay_log:
-        print(">> 입력 모드: 로그 파일 재생")
-        app.add_background_task(log_file_replayer)
         global_queues.server_operating_mode = "replay"
+        print(">> 입력 모드: 로그 파일 재생")
+        # log_replayer.py의 log_file_replayer를 임포트해서 사용해야 함
+        from log_replayer import log_file_replayer
+        app.add_background_task(log_file_replayer)
+    elif args.model_test:
+        global_queues.server_operating_mode = "model-test"
+        print(">> 입력 모드: 모델 테스트 (시리얼 입력)")
+        # 모델 테스트는 시리얼 입력을 전제로 함
+        app.add_background_task(serial_data_importer)
     else:
-        print(">> WebSocket 입력 모드로 실행합니다. (기본값)")
-        global_queues.server_operating_mode = "normal"
+        # 아무 인자가 없으면 WebSocket 모드가 기본값
+        global_queues.server_operating_mode = "Normal"
+        print(">> 입력 모드: WebSocket (Normal)")
 
-    app.add_background_task(file_logging_worker)
-    app.add_background_task(repetition_segmenter)
+    # --- 데이터 처리 및 출력 워커 설정 ---
+    if args.model_test:
+        # 모델 테스트 모드에서는 수동 세그멘터와 CSV 로거만 실행
+        app.add_background_task(manual_repetition_collector)
+        app.add_background_task(csv_result_logger)
+    else:
+        # 일반 모드에서는 자동 세그멘터, JSON 로거, 앱 결과 전송기 실행
+        app.add_background_task(file_logging_worker)
+        app.add_background_task(repetition_segmenter)
+        app.add_background_task(result_emitter)
+
+    # AI 추론 워커는 모든 모드에서 공통으로 필요함
     app.add_background_task(inference_worker)
-    app.add_background_task(result_emitter)
-    print("모든 데이터 처리 파이프라인 워커가 시작되었습니다.")
+
+    print("모든 데이터 처리 워커가 시작되었습니다.")
 
 # --- 서버 실행 ---
 if __name__ == '__main__':

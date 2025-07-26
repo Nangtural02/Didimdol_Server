@@ -1,5 +1,6 @@
 import asyncio
 import json
+import csv
 import datetime as dt
 from pathlib import Path
 from dataclasses import asdict
@@ -7,7 +8,7 @@ from quart import Blueprint, websocket, render_template
 from utils import parse_sensor_data, clear_all_queues
 import global_queues
 from global_queues import LOGGING_QUEUE, RAW_DATA_QUEUE, sensor_websockets, app_websockets, debug_websockets
-from data_models import SensorData
+from data_models import SensorData, SquatSegment, InferenceResult
 
 bp = Blueprint('main_endpoints', __name__)
 
@@ -15,6 +16,117 @@ async def broadcast(data: str, clients: set):
     tasks = [client.send(data) for client in clients]
     await asyncio.gather(*tasks, return_exceptions=True)
 
+
+# ✅ [새 기능] 모델 테스트 UI를 제공하는 HTTP 엔드포인트
+@bp.route('/model-test')
+async def model_test_page():
+    return await render_template("model_test.html")
+
+
+@bp.websocket('/model-test-ws')
+async def model_test_ws_handler():
+    """웹 UI로부터 모델 테스트 제어 명령을 수신합니다."""
+    client = websocket._get_current_object()
+    print("[Model Test WS] 제어용 웹 UI 연결됨.")
+    try:
+        while True:
+            message = await client.receive()
+            command = json.loads(message)
+            print(f"[Model Test WS] Received command: {command}")
+
+            cmd = command.get("command")
+
+            # --- 전체 측정 제어 ---
+            if cmd == "start_overall_test":
+                if global_queues.is_processing_active:
+                    await client.send(json.dumps({"status": "Error", "message": "Test is already running."}))
+                    continue
+
+                await clear_all_queues(
+                    global_queues.RAW_DATA_QUEUE,
+                    global_queues.SEGMENT_QUEUE,
+                    global_queues.RESULT_QUEUE
+                )
+                global_queues.repetition_count = 0
+                global_queues.is_processing_active = True
+
+                # ✅ [온전한 코드] CSV 파일 열기 및 DictWriter 설정
+                log_dir = Path("./log");
+                log_dir.mkdir(exist_ok=True)
+                now_str = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+                # CSV 파일명 생성 (사용자 정보는 웹 UI에서 받지 않으므로 'model_test'로 고정)
+                base_filename = f"model_test_session_{now_str}"
+                global_queues.csv_file_path = log_dir / f"{base_filename}_results.csv"
+
+                # 파일을 열고 핸들러를 전역 변수에 저장
+                global_queues.csv_file_handler = global_queues.csv_file_path.open("w", encoding="utf-8", newline="")
+
+                # CSV 헤더(필드명) 정의. InferenceResult의 필드와 일치해야 함.
+                fieldnames = [field.name for field in InferenceResult.__dataclass_fields__.values()]
+
+                # DictWriter 객체를 생성하고 헤더를 씀
+                global_queues.csv_writer = csv.DictWriter(global_queues.csv_file_handler, fieldnames=fieldnames)
+                global_queues.csv_writer.writeheader()
+
+                print(f"Model test started. Saving results to: {global_queues.csv_file_path}")
+                await client.send(json.dumps({"status": "Overall test started"}))
+
+            elif cmd == "stop_overall_test":
+                if not global_queues.is_processing_active:
+                    continue
+
+                global_queues.is_processing_active = False
+
+                # ✅ [온전한 코드] CSV 파일 핸들러 닫기
+                if global_queues.csv_file_handler:
+                    global_queues.csv_file_handler.close()
+                    print(f"CSV log saved to: {global_queues.csv_file_path}")
+
+                # 전역 변수 초기화
+                global_queues.csv_file_handler = None
+                global_queues.csv_writer = None
+                global_queues.csv_file_path = None
+
+                await client.send(json.dumps({"status": "Overall test stopped"}))
+
+            # --- 1회 스쿼트 측정 제어 ---
+            elif cmd == "start_rep":
+                if not global_queues.is_processing_active:
+                    await client.send(json.dumps({"status": "Error: Overall test not started"}))
+                    continue
+                global_queues.is_rep_recording_active = True
+                global_queues.rep_data_buffer.clear()
+                await client.send(json.dumps({"status": "Repetition recording started"}))
+
+            elif cmd == "stop_rep":
+                if not global_queues.is_rep_recording_active:
+                    continue
+                global_queues.is_rep_recording_active = False
+
+                if global_queues.rep_data_buffer:
+                    global_queues.repetition_count += 1
+                    squat_event = SquatSegment(
+                        repetition_count=global_queues.repetition_count,
+                        start_timestamp=global_queues.rep_data_buffer[0].Timestamp,
+                        data=list(global_queues.rep_data_buffer)
+                    )
+                    await global_queues.SEGMENT_QUEUE.put(squat_event)
+                    print(f"[Model Test] {global_queues.repetition_count}번째 수동 세그먼트를 큐에 추가함.")
+                    await client.send(json.dumps({
+                        "status": "Repetition stopped",
+                        "rep_count": global_queues.repetition_count
+                    }))
+                global_queues.rep_data_buffer.clear()
+
+    except asyncio.CancelledError:
+        print("[Model Test WS] 제어용 웹 UI 연결 끊김.")
+    finally:
+        # 비정상 종료 시 테스트 강제 종료 및 파일 닫기
+        if global_queues.is_processing_active:
+            global_queues.is_processing_active = False
+            if global_queues.csv_file_handler:
+                global_queues.csv_file_handler.close()
+            print("[Model Test WS] Connection closed, forcefully stopped test.")
 @bp.websocket('/sensor')
 async def sensor_handler():
     """수신된 데이터를 is_processing_active 상태에 따라 처리하거나 버립니다."""
