@@ -20,5 +20,10 @@ async def csv_result_logger():
                 # 파일에 즉시 반영되도록 flush
                 global_queues.csv_file_handler.flush()
                 print(f"[CSV Logger] {result.count}번째 결과 CSV에 저장 완료.")
+                # ✅ 2. [핵심] 최신 결과를 전역 캐시에 저장
+                global_queues.last_inference_result = result
+
+                # ✅ 3. [핵심] 대기 중인 핸들러에게 "새 결과 준비 완료" 신호를 보냄
+                global_queues.NEW_RESULT_EVENT.set()
         finally:
             global_queues.RESULT_QUEUE.task_done()

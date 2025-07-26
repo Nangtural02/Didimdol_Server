@@ -1,5 +1,7 @@
 import asyncio
 import csv
+from typing import Optional
+from data_models import InferenceResult
 
 RAW_DATA_QUEUE = asyncio.Queue()
 LOGGING_QUEUE = asyncio.Queue()
@@ -31,5 +33,7 @@ rep_data_buffer = []             # 1회 스쿼트 데이터 임시 저장 버퍼
 csv_file_handler = None
 csv_writer: csv.DictWriter | None = None
 csv_file_path = None
+last_inference_result: Optional[InferenceResult] = None
+NEW_RESULT_EVENT = asyncio.Event()
 
 server_operating_mode = "Normal"

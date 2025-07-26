@@ -99,10 +99,9 @@ async def model_test_ws_handler():
                 await client.send(json.dumps({"status": "Repetition recording started"}))
 
             elif cmd == "stop_rep":
-                if not global_queues.is_rep_recording_active:
-                    continue
+                if not global_queues.is_rep_recording_active: continue
                 global_queues.is_rep_recording_active = False
-
+                response_payload = {}
                 if global_queues.rep_data_buffer:
                     global_queues.repetition_count += 1
                     squat_event = SquatSegment(
@@ -112,11 +111,30 @@ async def model_test_ws_handler():
                     )
                     await global_queues.SEGMENT_QUEUE.put(squat_event)
                     print(f"[Model Test] {global_queues.repetition_count}번째 수동 세그먼트를 큐에 추가함.")
-                    await client.send(json.dumps({
-                        "status": "Repetition stopped",
-                        "rep_count": global_queues.repetition_count
-                    }))
+                    # ✅ [핵심 수정] 큐에서 빼내는 대신, 새 결과가 나올 때까지 신호를 기다림
+                    print("[Model Test] AI 추론 결과 신호를 기다리는 중...")
+                    try:
+                        # 타임아웃을 설정하여 무한정 기다리는 것을 방지
+                        await asyncio.wait_for(global_queues.NEW_RESULT_EVENT.wait(), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        print("[Model Test] AI 결과 수신 타임아웃.")
+                        response_payload = {"status": "Error: AI result timeout"}
+                    else:
+                        print(f"[Model Test] AI 추론 결과 신호 수신!")
+                        result = global_queues.last_inference_result
+                        response_payload = {
+                            "status": "Repetition processed",
+                            "rep_count": global_queues.repetition_count,
+                            "result": asdict(result) if result else None
+                        }
+                    finally:
+                        # 다음 신호를 위해 이벤트를 초기화
+                        global_queues.NEW_RESULT_EVENT.clear()
+                else:
+                    response_payload = {"status": "Repetition stopped (no data)",
+                                        "rep_count": global_queues.repetition_count}
                 global_queues.rep_data_buffer.clear()
+                await client.send(json.dumps(response_payload))
 
     except asyncio.CancelledError:
         print("[Model Test WS] 제어용 웹 UI 연결 끊김.")
