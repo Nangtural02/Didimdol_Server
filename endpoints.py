@@ -4,7 +4,7 @@ import datetime as dt
 from pathlib import Path
 from dataclasses import asdict
 from quart import Blueprint, websocket, render_template
-from utils import parse_sensor_data
+from utils import parse_sensor_data, clear_all_queues
 import global_queues
 from global_queues import LOGGING_QUEUE, RAW_DATA_QUEUE, sensor_websockets, app_websockets, debug_websockets
 from data_models import SensorData
@@ -60,49 +60,77 @@ async def app_handler():
                     if global_queues.is_processing_active:
                         await client.send(json.dumps({"status": "error", "message": "Already processing."}))
                         continue
+                    await clear_all_queues(
+                        global_queues.RAW_DATA_QUEUE,
+                        global_queues.LOGGING_QUEUE,
+                        global_queues.SEGMENT_QUEUE,
+                        global_queues.RESULT_QUEUE
+                    )
+                    global_queues.repetition_count = 0
                     global_queues.is_processing_active = True
-                    if global_queues.server_operating_mode == "normal":
-                        global_queues.is_first_entry_in_file = True
-                        # 파일 열기 로직은 동일
-                        log_dir = Path("./log")
-                        log_dir.mkdir(exist_ok=True)
-                        now_str = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-                        filename = f"{command.get('user', 'unknown')}_{command.get('session', '1')}_{now_str}.json"
-                        log_file_path = log_dir / filename
-                        log_file_handler = log_file_path.open("w", encoding="utf-8")
-                        log_file_handler.write("[\n")
 
-                        print(f"Processing started. Logging to: {log_file_path}")
+                    log_dir = Path("./log");
+                    log_dir.mkdir(exist_ok=True)
+                    now_str = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+                    base_filename = f"{command.get('user', 'unknown')}_{command.get('session', '1')}_{now_str}"
+
+                    # 결과 로그 저장은 모든 모드에서 공통으로 수행
+                    global_queues.is_first_entry_in_results_file = True
+                    global_queues.result_log_file_path = log_dir / f"{base_filename}_results.json"
+                    global_queues.result_log_file_handler = global_queues.result_log_file_path.open("w",
+                                                                                                    encoding="utf-8")
+                    global_queues.result_log_file_handler.write("[\n")
+                    print(f"Result logging started to: {global_queues.result_log_file_path}")
+
+                    # ✅ "Normal"과 "serial" 모드에서만 원본 데이터 로깅
+                    if global_queues.server_operating_mode in ["Normal", "serial"]:
+                        global_queues.is_first_entry_in_file = True
+                        global_queues.log_file_path = log_dir / f"{base_filename}_raw.json"
+                        global_queues.log_file_handler = global_queues.log_file_path.open("w", encoding="utf-8")
+                        global_queues.log_file_handler.write("[\n")
+                        print(f"Raw data logging started to: {global_queues.log_file_path}")
                         await client.send(json.dumps({"status": "processing_started"}))
+
                     elif global_queues.server_operating_mode == "replay":
                         if not global_queues.START_REPLAY_EVENT.is_set():
                             global_queues.START_REPLAY_EVENT.set()
                         print(f"Replaying started.")
                         await client.send(json.dumps({"status": "replay_started"}))
 
-                # ✅ "stop_processing" 명령 처리
                 elif command.get("command") == "stop_processing":
                     if not global_queues.is_processing_active:
                         await client.send(json.dumps({"status": "error", "message": "Not processing."}))
                         continue
-                    global_queues.is_processing_active = False
-                    if global_queues.server_operating_mode == "normal":
 
-                        # 파일 닫기 로직은 동일
+                    global_queues.is_processing_active = False
+
+                    # 결과 로그 파일 닫기는 모든 모드에서 공통
+                    if global_queues.result_log_file_handler:
+                        if not global_queues.is_first_entry_in_results_file:
+                            global_queues.result_log_file_handler.seek(global_queues.result_log_file_handler.tell() - 2)
+                        global_queues.result_log_file_handler.write("\n]\n")
+                        global_queues.result_log_file_handler.close()
+                        print(f"Result log file saved: {global_queues.result_log_file_path}")
+                        global_queues.result_log_file_handler = None
+                        global_queues.result_log_file_path = None
+
+                    # ✅ "Normal"과 "serial" 모드에서만 원본 데이터 로그 파일 닫기
+                    if global_queues.server_operating_mode in ["Normal", "serial"]:
                         if global_queues.log_file_handler:
                             if not global_queues.is_first_entry_in_file:
                                 global_queues.log_file_handler.seek(global_queues.log_file_handler.tell() - 2)
                             global_queues.log_file_handler.write("\n]\n")
                             global_queues.log_file_handler.close()
+                            print(f"Raw data log file saved: {global_queues.log_file_path}")
+                            await client.send(
+                                json.dumps({"status": "processing_stopped", "file": str(global_queues.log_file_path)}))
+                        global_queues.log_file_handler = None
+                        global_queues.log_file_path = None
 
-                            print(f"Processing stopped. Log file saved: {global_queues.log_file_path}")
-                            await client.send(json.dumps({"status": "processing_stopped", "file": str(log_file_path)}))
-                        log_file_handler = None
-                        log_file_path = None
                     elif global_queues.server_operating_mode == "replay":
                         if global_queues.START_REPLAY_EVENT.is_set():
                             global_queues.START_REPLAY_EVENT.clear()
-
+                        await client.send(json.dumps({"status": "replay_stopped"}))
 
             except Exception as e:
                 print(f"[App WS] Error processing command: {e}")

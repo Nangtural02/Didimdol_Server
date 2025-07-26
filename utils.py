@@ -38,3 +38,21 @@ def parse_sensor_data(s: str) -> SensorData | None:
     except (ValueError, IndexError) as e:
         print(f"[Parser] Error parsing packet: {e}. Content: '{original_message}'")
         return None
+
+async def clear_all_queues(*queues: asyncio.Queue):
+    """
+    주어진 모든 asyncio.Queue의 내용을 비웁니다.
+    """
+    print("[Queue Utils] 모든 데이터 큐를 초기화합니다...")
+    cleared_count = 0
+    for q in queues:
+        while not q.empty():
+            try:
+                item = q.get_nowait()
+                cleared_count += 1
+                q.task_done()
+            except asyncio.QueueEmpty:
+                # 다른 작업이 동시에 아이템을 가져간 경우
+                break
+    if cleared_count > 0:
+        print(f"[Queue Utils] 총 {cleared_count}개의 잔여 아이템을 제거했습니다.")

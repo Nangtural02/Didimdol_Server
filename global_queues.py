@@ -9,6 +9,7 @@ sensor_websockets = set()
 app_websockets = set()
 debug_websockets = set()
 
+repetition_count = 0
 is_processing_active = False
 
 START_REPLAY_EVENT = asyncio.Event()
@@ -16,5 +17,9 @@ START_REPLAY_EVENT = asyncio.Event()
 log_file_handler = None
 log_file_path = None
 is_first_entry_in_file = True
+
+result_log_file_handler = None
+result_log_file_path = None
+is_first_entry_in_results_file = True
 
 server_operating_mode = "Normal"

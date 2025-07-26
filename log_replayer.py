@@ -61,15 +61,13 @@ async def log_file_replayer():
     print(f"[Log Replayer] 파일 로드 완료. 총 {len(all_data_points_obj)}개의 데이터 포인트.")
 
     # ✅ 2. 무한 루프를 통해 워커가 종료되지 않고 계속 대기/재생 상태를 반복하게 합니다.
-    loop_count = 0
     while True:
-        loop_count += 1
-        print(f"\n[Log Replayer] (#{loop_count}) 재생 준비 완료. 앱에서 'start_processing' 명령을 기다립니다...")
+        print(f"\n[Log Replayer] 재생 준비 완료. 앱에서 운동 시작 버튼을 기다립니다...")
 
         # ✅ 3. 'WAITING' 상태: 앱의 시작 신호가 올 때까지 여기서 대기합니다.
         await global_queues.START_REPLAY_EVENT.wait()
 
-        print(f"[Log Replayer] 시작 신호 수신! (#{loop_count}) 재생을 시작합니다.")
+        print(f"[Log Replayer] 시작 신호 수신! 재생을 시작합니다.")
 
         # ✅ 4. 'REPLAYING' 상태: 메모리에 있는 데이터를 사용하여 재생합니다.
         previous_timestamp = all_data_points_obj[0].Timestamp
@@ -77,6 +75,7 @@ async def log_file_replayer():
             # 사용자가 중간에 'stop'을 누르면 즉시 재생을 멈춥니다.
             if not global_queues.is_processing_active:
                 print("[Log Replayer] 'stop_processing' 신호 감지. 재생을 중단합니다.")
+
                 break
 
             current_timestamp = data_point.Timestamp
@@ -91,7 +90,7 @@ async def log_file_replayer():
             )
             await broadcast_to_debug(json.dumps(asdict(data_point)))
 
-        print(f"[Log Replayer] (#{loop_count}) 파일 재생 완료.")
+        print(f"[Log Replayer] 파일 재생 완료.")
 
         # ✅ 5. 다음 루프를 위해 이벤트를 '초기화(clear)'하여 다시 대기 상태로 만듭니다.
         #    만약 사용자가 'stop'을 눌러 중간에 멈췄다면, app_handler가 이미 clear했을 것입니다.
