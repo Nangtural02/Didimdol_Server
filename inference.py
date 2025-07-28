@@ -100,7 +100,7 @@ MODEL_PATH = "squat_model.pth"  # 훈련된 모델 파일
 # 모델 인스턴스 생성 및 가중치 로드
 try:
     print("[Inference] AI 모델 로딩을 시작합니다...")
-    model = SquatPoseModel(feat_dim=128, num_domains=7)
+    model = SquatPoseModel(feat_dim=256, num_domains=7)
     model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
     model.to(DEVICE)
     model.eval()  # 모델을 추론 모드로 설정
