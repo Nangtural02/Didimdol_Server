@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <title>모델 성능 평가 제어판</title>
+    <title>모델 성능 평가 제어판 (자동 큐)</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; padding: 20px; background-color: #f4f4f9; }
         .container { border: 1px solid #ddd; background-color: #fff; padding: 20px; border-radius: 12px; margin-bottom: 20px; text-align: center; width: 90%; max-width: 500px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
@@ -13,13 +13,14 @@
         .start-button { background-color: #4CAF50; color: white; }
         .stop-button { background-color: #f44336; color: white; }
         .rep-start-button { background-color: #2196F3; color: white; }
-        .rep-stop-button { background-color: #ff9800; color: white; }
         #status, #repCount { font-size: 1.5em; margin: 10px; font-weight: bold; color: #555; }
         #resultDisplay { text-align: left; padding: 15px; margin-top: 10px; background-color: #e9ecef; border-radius: 8px; white-space: pre-wrap; font-family: 'Courier New', Courier, monospace; font-size: 1.1em; line-height: 1.6; color: #495057; min-height: 150px; }
+        .timer-display { font-size: 2.5em; font-weight: bold; color: #d9534f; min-height: 50px; }
+        .cue-message { font-size: 1.8em; font-style: italic; color: #5bc0de; min-height: 40px; }
     </style>
 </head>
 <body>
-    <h1>모델 성능 평가 제어판</h1>
+    <h1>모델 성능 평가 제어판 (자동 큐)</h1>
 
     <div class="container">
         <h2>전체 측정</h2>
@@ -27,8 +28,10 @@
     </div>
 
     <div class="container">
-        <h2>1회 스쿼트</h2>
-        <button id="btnToggleRep" class="rep-start-button" disabled>회차 시작</button>
+        <h2>1회 스쿼트 (자동 6초)</h2>
+        <button id="btnStartTimedRep" class="rep-start-button" disabled>자동 회차 측정</button>
+        <div class="cue-message" id="cueMessage"></div>
+        <div class="timer-display" id="timerDisplay"></div>
     </div>
 
     <div class="container">
@@ -43,13 +46,44 @@
         const ws = new WebSocket(`ws://${window.location.host}/model-test-ws`);
 
         const btnToggleOverall = document.getElementById('btnToggleOverall');
-        const btnToggleRep = document.getElementById('btnToggleRep');
+        const btnStartTimedRep = document.getElementById('btnStartTimedRep');
         const statusEl = document.getElementById('status');
         const repCountEl = document.getElementById('repCount');
         const resultDisplayEl = document.getElementById('resultDisplay');
+        const cueMessageEl = document.getElementById('cueMessage');
+        const timerDisplayEl = document.getElementById('timerDisplay');
+
+        let audioCtx;
+
+        function initAudio() {
+            if (audioCtx) return;
+            try {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            } catch (e) {
+                console.error("Web Audio API is not supported in this browser.", e);
+            }
+        }
+
+        function playBeep(type) {
+            if (!audioCtx) {
+                initAudio();
+                if (!audioCtx) return;
+            }
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+
+            oscillator.type = 'sine';
+            oscillator.frequency.setValueAtTime(type === 'up' ? 880 : 440, audioCtx.currentTime);
+
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
+
+            oscillator.start();
+            oscillator.stop(audioCtx.currentTime + 0.15);
+        }
 
         let isOverallTestRunning = false;
-        let isRepRecording = false;
+        let timerInterval;
 
         function sendCommand(command) {
             if (ws.readyState === WebSocket.OPEN) {
@@ -61,82 +95,99 @@
         ws.onclose = () => {
             statusEl.textContent = '서버 연결 끊김';
             isOverallTestRunning = false;
-            isRepRecording = false;
             updateOverallButtonUI();
-            updateRepButtonUI();
+            stopTimer();
         };
 
         ws.onmessage = (event) => {
             const data = JSON.parse(event.data);
-            statusEl.textContent = data.status;
-            if (data.rep_count !== undefined) {
-                repCountEl.textContent = data.rep_count;
+            statusEl.textContent = `서버 응답: ${data.status}`;
+
+            if (data.message) {
+                cueMessageEl.textContent = data.message;
             }
-            if (data.result) {
-                const result = data.result;
-                const formattedResult =
+
+            if (data.status === "START") {
+                startTimer(6);
+                btnStartTimedRep.disabled = true;
+                resultDisplayEl.textContent = "측정 중...";
+            } else if (data.status === "DOWN") {
+                playBeep('down');
+            } else if (data.status === "UP") {
+                playBeep('up');
+            } else if (data.status === "STOP" || data.status.startsWith("Error")) {
+                stopTimer();
+                btnStartTimedRep.disabled = false;
+                if (data.rep_count !== undefined) {
+                    repCountEl.textContent = data.rep_count;
+                }
+                if (data.result) {
+                    displayResult(data.result);
+                } else {
+                    resultDisplayEl.textContent = data.message || "오류가 발생했습니다.";
+                }
+            }
+        };
+
+        function startTimer(duration) {
+            let timeLeft = duration;
+            timerDisplayEl.textContent = timeLeft;
+            clearInterval(timerInterval);
+            timerInterval = setInterval(() => {
+                timeLeft--;
+                timerDisplayEl.textContent = timeLeft;
+                if (timeLeft <= 0) {
+                    clearInterval(timerInterval);
+                }
+            }, 1000);
+        }
+
+        function stopTimer() {
+            clearInterval(timerInterval);
+            timerDisplayEl.textContent = "";
+            cueMessageEl.textContent = "";
+        }
+
+        function displayResult(result) {
+            const formattedResult =
 `  횟수: ${result.count}
   총점: ${result.totalScore}
   --------------------
-  Head:  ${result.head}
-  Spine: ${result.spine}
-  Knees: ${result.knees}
-  Feet:  ${result.feet}`;
-                resultDisplayEl.textContent = formattedResult;
-            } else if (data.status.toLowerCase().includes('stopped')) {
-                resultDisplayEl.textContent = "측정이 중단되었습니다.";
+  Head:  ${result.head}, Spine: ${result.spine}
+  Knees: ${result.knees}, Feet:  ${result.feet}`;
+            resultDisplayEl.textContent = formattedResult;
+        }
+
+        document.body.addEventListener('click', initAudio, { once: true });
+
+        btnToggleOverall.onclick = () => {
+            initAudio(); // 클릭 시 오디오 초기화 보장
+            if (isOverallTestRunning) {
+                sendCommand('stop_overall_test');
+                stopTimer();
+            } else {
+                sendCommand('start_overall_test');
             }
+            isOverallTestRunning = !isOverallTestRunning;
+            updateOverallButtonUI();
         };
 
         function updateOverallButtonUI() {
             if (isOverallTestRunning) {
                 btnToggleOverall.textContent = '측정 종료';
                 btnToggleOverall.className = 'stop-button';
-                btnToggleOverall.disabled = false;
-                btnToggleRep.disabled = false;
+                btnStartTimedRep.disabled = false;
             } else {
                 btnToggleOverall.textContent = '측정 시작';
                 btnToggleOverall.className = 'start-button';
-                btnToggleOverall.disabled = false;
-                btnToggleRep.disabled = true;
+                btnStartTimedRep.disabled = true;
                 repCountEl.textContent = '0';
                 resultDisplayEl.textContent = "아직 결과가 없습니다.";
             }
         }
 
-        function updateRepButtonUI() {
-            if (isRepRecording) {
-                btnToggleRep.textContent = '회차 종료';
-                btnToggleRep.className = 'rep-stop-button';
-            } else {
-                btnToggleRep.textContent = '회차 시작';
-                btnToggleRep.className = 'rep-start-button';
-            }
-        }
-
-        btnToggleOverall.onclick = () => {
-            if (isOverallTestRunning) {
-                sendCommand('stop_overall_test');
-            } else {
-                sendCommand('start_overall_test');
-            }
-            isOverallTestRunning = !isOverallTestRunning;
-            updateOverallButtonUI();
-            if (!isOverallTestRunning && isRepRecording) {
-                isRepRecording = false;
-                updateRepButtonUI();
-            }
-        };
-
-        btnToggleRep.onclick = () => {
-            if (isRepRecording) {
-                sendCommand('stop_rep');
-            } else {
-                resultDisplayEl.textContent = "AI 모델 분석 중...";
-                sendCommand('start_rep');
-            }
-            isRepRecording = !isRepRecording;
-            updateRepButtonUI();
+        btnStartTimedRep.onclick = () => {
+            sendCommand('start_timed_rep');
         };
     </script>
 </body>
