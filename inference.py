@@ -96,7 +96,7 @@ class SquatPoseModel(nn.Module):
 
 # -------------------- 모델 로드 및 초기 설정 --------------------
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-MODEL_PATH = "squat_model.pth"  # 훈련된 모델 파일
+MODEL_PATH = "squat_model.pth2"  # 훈련된 모델 파일
 
 # 모델 인스턴스 생성 및 가중치 로드
 try:
