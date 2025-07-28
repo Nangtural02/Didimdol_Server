@@ -3,6 +3,7 @@ import torch
 import torch.nn as nn
 from torch.autograd import Function
 import numpy as np
+import pandas as pd
 import os
 from math import floor, ceil
 
@@ -117,12 +118,13 @@ def preprocess_data(data_segment: list[SensorData]) -> torch.Tensor:
     실시간으로 들어온 센서 데이터를 AI 모델 입력 형식에 맞게 전처리합니다.
     """
     if not data_segment:
-        # 처리할 데이터가 아예 없으면 0으로 채워진 텐서 반환
-        return torch.zeros(120, 50)
+        return torch.zeros(120, 50) # 데이터 없으면 빈 텐서 반환
     
+    # 학습 시와 동일한 태그 순서 및 특징
     ANCHOR_IDS_IN_ORDER = [0, 1, 2, 3, 4]
+    FEATURES_IN_ORDER = ['ax','ay','az','gx','gy','gz','mx','my','mz','Distance']
 
-    # 하나의 시간 구간으로 묶을 시간 창 크기 (단위: 초). 30ms로 설정
+    # 50ms 간격으로 시간 축을 나누어 시퀀스 생성
     WINDOW_SIZE = 0.05
 
     # 1. 전체 데이터의 시작과 끝 시간 찾기
@@ -131,7 +133,7 @@ def preprocess_data(data_segment: list[SensorData]) -> torch.Tensor:
     duration = end_time - start_time
 
     # 2. 필요한 시간 창(bin)의 개수 계산
-    num_bins = ceil((end_time - start_time) / WINDOW_SIZE) if duration > 0 else 1
+    num_bins = ceil(duration / WINDOW_SIZE) if duration > 0 else 1
     
     # 3. 각 시간 창을 대표하는 빈 딕셔너리 리스트 생성
     binned_data = [{} for _ in range(num_bins)]
@@ -142,33 +144,41 @@ def preprocess_data(data_segment: list[SensorData]) -> torch.Tensor:
         if bin_index >= num_bins: bin_index = num_bins - 1
         binned_data[bin_index][d.TagAddr] = d
 
-    # 5. 시간 창 리스트를 순회하며 (N, 50) 형태의 시퀀스 생성
+    # 5. 시간 창 리스트를 순회하며 (N, 50) 형태의 시퀀스 생성 (누락 데이터는 np.nan 처리)
     processed_sequence = []
     for time_bin in binned_data:
         feature_vector_for_one_step = []
         
-        # [핵심 로직] 정해진 앵커 순서대로 데이터가 있는지 확인
         for anchor_id in ANCHOR_IDS_IN_ORDER:
-            # time_bin 딕셔너리에서 해당 anchor_id의 데이터를 가져오려 시도
             sensor_data = time_bin.get(anchor_id) 
             
             if sensor_data:
-                # ✅ 데이터가 있으면 10개 특징을 정상적으로 추출
+                # 데이터가 있으면 특징 추출
                 features = [
-                    float(sensor_data.ax), float(sensor_data.ay), float(sensor_data.az),
-                    float(sensor_data.gx), float(sensor_data.gy), float(sensor_data.gz),
-                    float(sensor_data.mx), float(sensor_data.my), float(sensor_data.mz),
-                    sensor_data.Distance
+                    float(getattr(sensor_data, f)) for f in FEATURES_IN_ORDER
                 ]
                 feature_vector_for_one_step.extend(features)
             else:
-                # 데이터가 없으면 (get()이 None을 반환하면) 0으로 10개 채우기
-                feature_vector_for_one_step.extend([0.0] * 10)
+                # 데이터가 없으면 np.nan으로 10개 채우기 (핵심 변경점)
+                feature_vector_for_one_step.extend([np.nan] * len(FEATURES_IN_ORDER))
         
         processed_sequence.append(feature_vector_for_one_step)
 
-    # 6. 최종 시퀀스를 (120, 50) 크기의 텐서로 변환
-    x = torch.tensor(processed_sequence, dtype=torch.float32)
+    # 6. Pandas DataFrame을 이용한 선형 보간 (학습 코드와 동일)
+    segment_array = np.array(processed_sequence, dtype=np.float32)
+    df_segment = pd.DataFrame(segment_array)
+    
+    # 선형 보간
+    df_interp = df_segment.interpolate(method='linear', axis=0, limit_direction='both')
+    
+    # 보간 후에도 남은 NaN은 0으로 채우기
+    df_interp = df_interp.fillna(0)
+    df_interp = df_interp.round(3)
+    
+    final_sequence = df_interp.values
+
+    # 7. 최종 시퀀스를 (120, 50) 크기의 텐서로 변환 (패딩 및 자르기)
+    x = torch.tensor(final_sequence, dtype=torch.float32)
 
     if x.shape[0] < 120:
         pad_zeros = torch.zeros(120 - x.shape[0], 50)
