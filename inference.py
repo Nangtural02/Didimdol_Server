@@ -25,7 +25,7 @@ def grad_reverse(x, lambd=1.0):
 
 # -------------------- 모델 --------------------
 class MultiLSTMFeatureExtractor(nn.Module):
-    def __init__(self, input_dim=50, hidden_dim=64, num_layers=3):
+    def __init__(self, input_dim=50, hidden_dim=128, num_layers=3):
         super(MultiLSTMFeatureExtractor, self).__init__()
         self.lstms = nn.ModuleList([
             nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True, bidirectional=True)
@@ -46,12 +46,18 @@ class MultiLSTMFeatureExtractor(nn.Module):
         return feats
 # -------------------- Task Classifier --------------------
 class TaskClassifier(nn.Module):
-    def __init__(self, feat_dim, num_classes=3):
-        super(TaskClassifier, self).__init__()
-        self.fc = nn.Linear(feat_dim, num_classes)
+    def __init__(self, feat_dim=256, num_classes=3):
+        super().__init__()
+        # 기존 단일 FC → 두 개의 FC + Dropout
+        self.net = nn.Sequential(
+            nn.Linear(feat_dim, feat_dim//2),  # 256 → 128
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(feat_dim//2, num_classes)  # 128 → 3
+        )
 
     def forward(self, feat):
-        return self.fc(feat)
+        return self.net(feat)
     
 # -------------------- Domain Classifier --------------------
 class DomainClassifier(nn.Module):
@@ -72,7 +78,7 @@ class DomainClassifier(nn.Module):
 
 # -------------------- SquatPoseModel --------------------
 class SquatPoseModel(nn.Module):
-    def __init__(self, feat_dim=128, num_domains=6):
+    def __init__(self, feat_dim=256, num_domains=6):
         super(SquatPoseModel, self).__init__()
         self.feature_extractors = MultiLSTMFeatureExtractor(input_dim=50, hidden_dim=feat_dim//2)
         self.task_heads = nn.ModuleList([
