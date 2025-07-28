@@ -118,6 +118,7 @@ def preprocess_data(data_segment: list[SensorData]) -> torch.Tensor:
     실시간으로 들어온 센서 데이터를 AI 모델 입력 형식에 맞게 전처리합니다.
     """
     if not data_segment:
+        print("[Inference] [ERROR] 데이터 세그먼트가 비어 있습니다. 전처리를 건너뜁니다.")
         return torch.zeros(120, 50) # 데이터 없으면 빈 텐서 반환
     
     # 학습 시와 동일한 태그 순서 및 특징
