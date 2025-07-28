@@ -25,7 +25,7 @@ async def model_test_page():
 
 @bp.websocket('/model-test-ws')
 async def model_test_ws_handler():
-    """웹 UI로부터 모델 테스트 제어 명령을 수신합니다."""
+    """웹 UI로부터 모델 테스트 제어 명령을 수신하고, 타이머를 관리하며, 결과를 반환합니다."""
     client = websocket._get_current_object()
     print("[Model Test WS] 제어용 웹 UI 연결됨.")
     try:
@@ -33,7 +33,6 @@ async def model_test_ws_handler():
             message = await client.receive()
             command = json.loads(message)
             print(f"[Model Test WS] Received command: {command}")
-
             cmd = command.get("command")
 
             # --- 전체 측정 제어 ---
@@ -50,21 +49,13 @@ async def model_test_ws_handler():
                 global_queues.repetition_count = 0
                 global_queues.is_processing_active = True
 
-                # ✅ [온전한 코드] CSV 파일 열기 및 DictWriter 설정
                 log_dir = Path("./log");
                 log_dir.mkdir(exist_ok=True)
-                now_str = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
-                # CSV 파일명 생성 (사용자 정보는 웹 UI에서 받지 않으므로 'model_test'로 고정)
+                now_str = dt.datetime.now().strftime("%Y%m%d_%HM%S")
                 base_filename = f"model_test_session_{now_str}"
                 global_queues.csv_file_path = log_dir / f"{base_filename}_results.csv"
-
-                # 파일을 열고 핸들러를 전역 변수에 저장
                 global_queues.csv_file_handler = global_queues.csv_file_path.open("w", encoding="utf-8", newline="")
-
-                # CSV 헤더(필드명) 정의. InferenceResult의 필드와 일치해야 함.
                 fieldnames = [field.name for field in InferenceResult.__dataclass_fields__.values()]
-
-                # DictWriter 객체를 생성하고 헤더를 씀
                 global_queues.csv_writer = csv.DictWriter(global_queues.csv_file_handler, fieldnames=fieldnames)
                 global_queues.csv_writer.writeheader()
 
@@ -72,74 +63,73 @@ async def model_test_ws_handler():
                 await client.send(json.dumps({"status": "Overall test started"}))
 
             elif cmd == "stop_overall_test":
-                if not global_queues.is_processing_active:
-                    continue
-
+                if not global_queues.is_processing_active: continue
                 global_queues.is_processing_active = False
-
-                # ✅ [온전한 코드] CSV 파일 핸들러 닫기
                 if global_queues.csv_file_handler:
                     global_queues.csv_file_handler.close()
                     print(f"CSV log saved to: {global_queues.csv_file_path}")
-
-                # 전역 변수 초기화
-                global_queues.csv_file_handler = None
-                global_queues.csv_writer = None
-                global_queues.csv_file_path = None
-
+                global_queues.csv_file_handler, global_queues.csv_writer, global_queues.csv_file_path = None, None, None
                 await client.send(json.dumps({"status": "Overall test stopped"}))
 
-            # --- 1회 스쿼트 측정 제어 ---
-            elif cmd == "start_rep":
+            # --- 자동 타이머 기반의 1회 스쿼트 측정 ---
+            elif cmd == "start_timed_rep":
                 if not global_queues.is_processing_active:
-                    await client.send(json.dumps({"status": "Error: Overall test not started"}))
+                    await client.send(json.dumps({"status": "Error", "message": "Overall test not started."}))
                     continue
-                global_queues.is_rep_recording_active = True
-                global_queues.rep_data_buffer.clear()
-                await client.send(json.dumps({"status": "Repetition recording started"}))
 
-            elif cmd == "stop_rep":
-                if not global_queues.is_rep_recording_active: continue
+                start_time = asyncio.get_running_loop().time()
+                global_queues.rep_data_buffer.clear()
+
+                global_queues.is_rep_recording_active = True
+                await client.send(json.dumps({"status": "START", "message": "준비하세요..."}))
+
+                await asyncio.sleep(2.0)
+                down_time = asyncio.get_running_loop().time()
+                await client.send(json.dumps({"status": "DOWN", "message": "내려가세요"}))
+
+                await asyncio.sleep(2.0)
+                await client.send(json.dumps({"status": "UP", "message": "올라오세요"}))
+
+                await asyncio.sleep(2.0)
                 global_queues.is_rep_recording_active = False
+                stop_time = asyncio.get_running_loop().time()
+
+                model_input_data = [dp for dp in global_queues.rep_data_buffer if down_time <= dp.Timestamp]
+
                 response_payload = {}
-                if global_queues.rep_data_buffer:
+                if model_input_data:
                     global_queues.repetition_count += 1
                     squat_event = SquatSegment(
                         repetition_count=global_queues.repetition_count,
-                        start_timestamp=global_queues.rep_data_buffer[0].Timestamp,
-                        data=list(global_queues.rep_data_buffer)
+                        start_timestamp=model_input_data[0].Timestamp,
+                        data=model_input_data
                     )
                     await global_queues.SEGMENT_QUEUE.put(squat_event)
-                    print(f"[Model Test] {global_queues.repetition_count}번째 수동 세그먼트를 큐에 추가함.")
-                    # ✅ [핵심 수정] 큐에서 빼내는 대신, 새 결과가 나올 때까지 신호를 기다림
+
                     print("[Model Test] AI 추론 결과 신호를 기다리는 중...")
                     try:
-                        # 타임아웃을 설정하여 무한정 기다리는 것을 방지
                         await asyncio.wait_for(global_queues.NEW_RESULT_EVENT.wait(), timeout=5.0)
-                    except asyncio.TimeoutError:
-                        print("[Model Test] AI 결과 수신 타임아웃.")
-                        response_payload = {"status": "Error: AI result timeout"}
-                    else:
-                        print(f"[Model Test] AI 추론 결과 신호 수신!")
                         result = global_queues.last_inference_result
                         response_payload = {
-                            "status": "Repetition processed",
+                            "status": "STOP", "message": "측정 완료!",
                             "rep_count": global_queues.repetition_count,
                             "result": asdict(result) if result else None
                         }
+                    except asyncio.TimeoutError:
+                        print("[Model Test] AI 결과 수신 타임아웃.")
+                        response_payload = {"status": "Error", "message": "AI 결과 타임아웃"}
                     finally:
-                        # 다음 신호를 위해 이벤트를 초기화
                         global_queues.NEW_RESULT_EVENT.clear()
                 else:
-                    response_payload = {"status": "Repetition stopped (no data)",
+                    response_payload = {"status": "STOP", "message": "수집된 데이터가 없습니다.",
                                         "rep_count": global_queues.repetition_count}
-                global_queues.rep_data_buffer.clear()
+
                 await client.send(json.dumps(response_payload))
+                global_queues.rep_data_buffer.clear()
 
     except asyncio.CancelledError:
         print("[Model Test WS] 제어용 웹 UI 연결 끊김.")
     finally:
-        # 비정상 종료 시 테스트 강제 종료 및 파일 닫기
         if global_queues.is_processing_active:
             global_queues.is_processing_active = False
             if global_queues.csv_file_handler:
