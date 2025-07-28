@@ -85,10 +85,10 @@ async def model_test_ws_handler():
 
                 await asyncio.sleep(2.0)
                 down_time = asyncio.get_running_loop().time()
-                await client.send(json.dumps({"status": "DOWN", "message": "내려가세요 (삑)"}))
+                await client.send(json.dumps({"status": "DOWN", "message": "내려가세요"}))
 
                 await asyncio.sleep(2.0)
-                await client.send(json.dumps({"status": "UP", "message": "올라오세요 (삑)"}))
+                await client.send(json.dumps({"status": "UP", "message": "올라오세요"}))
 
                 await asyncio.sleep(2.0)
                 global_queues.is_rep_recording_active = False
