@@ -38,7 +38,7 @@ def blocking_serial_reader(port: str, loop: asyncio.AbstractEventLoop):
     읽은 데이터를 메인 이벤트 루프로 안전하게 전달합니다.
     """
     try:
-        ser = serial.Serial(port, 115200, timeout=1)
+        ser = serial.Serial(port, 115200*4, timeout=1)
         print(f"[Serial Importer] {port} 포트에서 데이터 수신 대기 중...")
     except serial.SerialException as e:
         print(f"[Serial Importer] 시리얼 포트를 여는 데 실패했습니다: {e}")

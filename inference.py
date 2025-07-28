@@ -235,6 +235,7 @@ async def inference_worker():
     print("[Inference] 추론 워커 시작됨.")
     while True:
         squat_event: SquatSegment = await SEGMENT_QUEUE.get()
+        print(f"[Inference] Segmented data lentgh: {len(squat_event.data)}")
         print(f"[Inference] {squat_event.repetition_count}번째 동작 추론 시작...")
 
         result = await run_ai_inference_placeholder(squat_event.data)
