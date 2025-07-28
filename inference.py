@@ -54,7 +54,7 @@ class TaskClassifier(nn.Module):
         self.net = nn.Sequential(
             nn.Linear(feat_dim, feat_dim//2),  # 256 → 128
             nn.ReLU(),
-            nn.Dropout(0.3),
+            nn.Dropout(0.5),
             nn.Linear(feat_dim//2, num_classes)  # 128 → 3
         )
 
@@ -70,7 +70,7 @@ class DomainClassifier(nn.Module):
             nn.ReLU(),
             nn.Linear(256, 128),
             nn.ReLU(),
-            nn.Dropout(0.5),
+            nn.Dropout(0.6),
             nn.Linear(128, num_domains)
         )
 
@@ -240,6 +240,7 @@ async def run_ai_inference_placeholder(data_segment: list[SensorData]) -> Infere
     # head, spine, knees, feet 순서라고 가정합니다.
     final_labels = []
     for i, pred_logits in enumerate(task_preds):
+        print(f"Task {i} pred_logits device: {pred_logits.device}")
         # 확률로 변환
         probabilities = torch.softmax(pred_logits, dim=1).cpu().numpy()
         # 해당 태스크의 최적 임계값 적용
