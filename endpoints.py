@@ -4,6 +4,9 @@ import csv
 import datetime as dt
 from pathlib import Path
 from dataclasses import asdict
+import pandas as pd
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 from quart import Blueprint, websocket, render_template
 from utils import parse_sensor_data, clear_all_queues
 import global_queues
@@ -11,6 +14,103 @@ from global_queues import LOGGING_QUEUE, RAW_DATA_QUEUE, sensor_websockets, app_
 from data_models import SensorData, SquatSegment, InferenceResult
 
 bp = Blueprint('main_endpoints', __name__)
+
+try:
+    scope = ['https://spreadsheets.google.com/feeds', 'https://www.googleapis.com/auth/drive']
+    creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', scope)
+    client = gspread.authorize(creds)
+    SHEET_NAME = "Perfect_Squat_Form_dataset"
+    sheet = client.open(SHEET_NAME).worksheet("Sheet2")
+    gsheet_df = pd.DataFrame(sheet.get_all_records())
+except Exception as e:
+    print(f"구글 시트 연결 오류: {e}")
+    gsheet_df = pd.DataFrame()
+
+HISTORY_DIR = "./history"  # history 폴더 경로를 실제 프로젝트에 맞게 확인/수정하세요.
+POSE_PARTS_MAP = {"상체": "Head", "무릎-발 정렬": "Knees", "발": "Feet"}
+
+def get_json_files():
+    if not Path(HISTORY_DIR).exists():
+        Path(HISTORY_DIR).mkdir()
+        return []
+    return sorted([f for f in Path(HISTORY_DIR).iterdir() if f.name.endswith(".json")])
+
+def get_respondents():
+    if not gsheet_df.empty:
+        respondent_col_name = gsheet_df.columns[0]
+        return gsheet_df[respondent_col_name].tolist()
+    return ["(시트 로드 실패)"]
+
+def process_comparison(selected_files, selected_respondent):
+    # (이전 답변에서 제공한 process_comparison 함수 내용 전체를 여기에 복사-붙여넣기)
+    model_results = {}
+    for filepath in selected_files:
+        filename = Path(filepath).name
+        with open(filepath, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+            # data가 list of dict 형태라고 가정
+            model_results[filename] = {item['count']: item for item in data}
+
+    respondent_col_name = gsheet_df.columns[0]
+    respondent_row = gsheet_df[gsheet_df[respondent_col_name] == selected_respondent]
+    if respondent_row.empty: return [], 0
+
+    comparison_data, total_correct, total_comparisons = [], 0, 0
+
+    for i in range(1, 31):
+        rep_data = {"rep_num": i, "parts": {}}
+        for part_kor, part_eng in POSE_PARTS_MAP.items():
+            part_result = {"model_scores": [], "respondent_score": None, "accuracy": 0}
+            gsheet_col_name = f"rep{i}_{part_kor}"
+            if gsheet_col_name in respondent_row:
+                respondent_score = int(respondent_row[gsheet_col_name].iloc[0])
+                part_result["respondent_score"] = respondent_score
+                correct_count = 0
+                for filepath in selected_files:
+                    filename = Path(filepath).name
+                    model_score = model_results.get(filename, {}).get(i, {}).get(part_eng, 'N/A')
+                    part_result["model_scores"].append(model_score)
+                    if model_score != 'N/A' and int(model_score) == respondent_score:
+                        correct_count += 1
+                part_result["accuracy"] = int((correct_count / len(selected_files)) * 100) if selected_files else 0
+                total_correct += correct_count
+                total_comparisons += len(selected_files)
+            else:
+                part_result["respondent_score"] = 'N/A'
+                part_result["model_scores"] = ['N/A'] * len(selected_files)
+            rep_data["parts"][part_kor] = part_result
+        comparison_data.append(rep_data)
+
+    overall_accuracy = int((total_correct / total_comparisons) * 100) if total_comparisons > 0 else 0
+    return comparison_data, overall_accuracy
+
+@bp.route('/analysis', methods=['GET', 'POST'])
+async def analysis():
+    """데이터 분석 페이지를 렌더링하고 폼 데이터를 처리합니다."""
+    json_files = [str(f) for f in get_json_files()] # Path 객체를 문자열로 변환
+    respondents = get_respondents()
+    results, total_accuracy, selected_files, selected_respondent = None, 0, [], ""
+
+    if request.method == 'POST':
+        form_data = await request.form
+        selected_files = form_data.getlist('json_files')
+        selected_respondent = form_data.get('respondent')
+        if selected_files and selected_respondent:
+            results, total_accuracy = process_comparison(selected_files, selected_respondent)
+
+    # 선택된 파일 이름을 Path가 아닌 문자열로 전달
+    selected_file_names = [Path(f).name for f in selected_files]
+
+    return await render_template(
+        'analysis.html',
+        json_files=json_files,
+        respondents=respondents,
+        results=results,
+        total_accuracy=total_accuracy,
+        selected_files=selected_files, # form 재선택을 위해 전체 경로 전달
+        selected_file_names=selected_file_names, # 테이블 헤더 표시를 위해 파일 이름만 전달
+        selected_respondent=selected_respondent
+    )
 
 async def broadcast(data: str, clients: set):
     tasks = [client.send(data) for client in clients]

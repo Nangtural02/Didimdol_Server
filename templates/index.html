@@ -5,6 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>UWB Sensor Live Monitor</title>
     <style>
+        .nav-links { margin-bottom: 10px; }
+        .nav-links a { margin: 0 10px; color: #4ec9b0; }
         body { font-family: monospace; background-color: #1e1e1e; color: #d4d4d4; padding: 1em; }
         h1 { border-bottom: 2px solid #4ec9b0; padding-bottom: 10px; }
         #log {
@@ -29,6 +31,11 @@
     </style>
 </head>
 <body>
+    <div class="nav-links">
+        <a href="/model-test">« 모델 성능 평가 제어판</a>
+        <a href="/analysis">데이터 분석 페이지 »</a>
+    </div>
+
     <h1>UWB Sensor Live Data</h1>
     <p>Status: <span id="status" class="disconnected">Connecting...</span></p>
 

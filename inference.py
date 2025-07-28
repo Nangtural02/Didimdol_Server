@@ -124,7 +124,6 @@ OPTIMAL_THRESHOLDS = [
 
 # 2. 임계값을 적용하는 헬퍼 함수를 추론 코드에 추가
 def apply_thresholds_live(probs, thresholds):
-    # ... (이전 학습 코드에 있던 apply_thresholds 함수와 동일) ...
     num_samples = probs.shape[0]
     preds = np.zeros(num_samples, dtype=int)
     for i in range(num_samples):
@@ -242,7 +241,7 @@ async def run_ai_inference_placeholder(data_segment: list[SensorData]) -> Infere
     for i, pred_logits in enumerate(task_preds):
         print(f"Task {i} pred_logits device: {pred_logits.device}")
         # 확률로 변환
-        probabilities = torch.softmax(pred_logits, dim=1).cpu().numpy()
+        probabilities = torch.softmax(pred_logits, dim=1).cpu().detach().numpy()
         # 해당 태스크의 최적 임계값 적용
         pred_label = apply_thresholds_live(probabilities, OPTIMAL_THRESHOLDS[i])
         final_labels.append(pred_label.item()) # .item()으로 스칼라 값 추출
