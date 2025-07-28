@@ -96,12 +96,12 @@ class SquatPoseModel(nn.Module):
 
 # -------------------- 모델 로드 및 초기 설정 --------------------
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-MODEL_PATH = "squat_model.pth"  # 훈련된 모델 파일
+MODEL_PATH = "squat_model_best.pth"  # 훈련된 모델 파일
 
 # 모델 인스턴스 생성 및 가중치 로드
 try:
     print("[Inference] AI 모델 로딩을 시작합니다...")
-    model = SquatPoseModel(feat_dim=256, num_domains=7)
+    model = SquatPoseModel(feat_dim=192, num_domains=7)
     model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
     model.to(DEVICE)
     model.eval()  # 모델을 추론 모드로 설정
@@ -112,6 +112,30 @@ except FileNotFoundError:
 except Exception as e:
     print(f"[Inference] [ERROR] 모델 로딩 중 오류 발생: {e}")
     model = None
+
+# 1. 튜닝을 통해 찾은 최적의 임계값을 상수로 정의
+OPTIMAL_THRESHOLDS = [
+    {1: 0.8500000000000002, 2: 0.6500000000000001},  # Task 1
+    {1: 0.1, 2: 0.1},  # Task 2
+    {1: 0.30000000000000004, 2: 0.7500000000000002},  # Task 3
+    {1: 0.7000000000000002, 2: 0.8000000000000002},  # Task 4
+]
+
+# 2. 임계값을 적용하는 헬퍼 함수를 추론 코드에 추가
+def apply_thresholds_live(probs, thresholds):
+    # ... (이전 학습 코드에 있던 apply_thresholds 함수와 동일) ...
+    num_samples = probs.shape[0]
+    preds = np.zeros(num_samples, dtype=int)
+    for i in range(num_samples):
+        pass_class_1 = probs[i, 1] >= thresholds.get(1, 0.5)
+        pass_class_2 = probs[i, 2] >= thresholds.get(2, 0.5)
+        if pass_class_1 and pass_class_2:
+            preds[i] = 1 if probs[i, 1] > probs[i, 2] else 2
+        elif pass_class_1:
+            preds[i] = 1
+        elif pass_class_2:
+            preds[i] = 2
+    return preds
 
 def preprocess_data(data_segment: list[SensorData]) -> torch.Tensor:
     """
@@ -213,9 +237,15 @@ async def run_ai_inference_placeholder(data_segment: list[SensorData]) -> Infere
     # 3. 추론 결과 해석
     # 각 task_head의 출력 (logits)에서 가장 확률이 높은 클래스를 선택합니다.
     # head, spine, knees, feet 순서라고 가정합니다.
-    pred_labels = [torch.argmax(pred, dim=1).item() for pred in task_preds]
-    
-    head_status, spine_status, knee_status, feet_status = pred_labels[0], pred_labels[1], pred_labels[2], pred_labels[3]
+    final_labels = []
+    for i, pred_logits in enumerate(task_preds):
+        # 확률로 변환
+        probabilities = torch.softmax(pred_logits, dim=1).cpu().numpy()
+        # 해당 태스크의 최적 임계값 적용
+        pred_label = apply_thresholds_live(probabilities, OPTIMAL_THRESHOLDS[i])
+        final_labels.append(pred_label.item()) # .item()으로 스칼라 값 추출
+
+    head_status, spine_status, knee_status, feet_status = final_labels[0], final_labels[1], final_labels[2], final_labels[3]
 
     # 4. 점수 계산 (훈련 코드의 점수 산정 방식과 동일하게 적용)
     total_status_sum = head_status + spine_status + knee_status + feet_status
