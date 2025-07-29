@@ -58,7 +58,7 @@ async def startup():
         global_queues.server_operating_mode = "model-test"
         print(">> 입력 모드: 모델 테스트 (시리얼 입력)")
         # 모델 테스트는 시리얼 입력을 전제로 함
-        app.add_background_task(serial_data_importer)
+        #app.add_background_task(serial_data_importer)
     else:
         # 아무 인자가 없으면 WebSocket 모드가 기본값
         global_queues.server_operating_mode = "Normal"

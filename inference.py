@@ -230,22 +230,19 @@ async def run_ai_inference_placeholder(data_segment: list[SensorData]) -> Infere
 
     # 2. 모델 추론 실행 (그래디언트 계산 비활성화)
     with torch.no_grad():
-        # `asyncio.to_thread`를 사용하여 동기적인 모델 추론 코드가
-        # 비동기 이벤트 루프를 막지 않도록 별도 스레드에서 실행합니다. (Python 3.9+).
-        # Python 3.8 이하의 경우: loop.run_in_executor(None, model, input_tensor)
         task_preds, _ = await asyncio.to_thread(model, input_tensor, 1.0)
 
     # 3. 추론 결과 해석
-    # 각 task_head의 출력 (logits)에서 가장 확률이 높은 클래스를 선택합니다.
-    # head, spine, knees, feet 순서라고 가정합니다.
     final_labels = []
-    for i, pred_logits in enumerate(task_preds):
-        print(f"Task {i} pred_logits device: {pred_logits.device}")
-        # 확률로 변환
-        probabilities = torch.softmax(pred_logits, dim=1).cpu().detach().numpy()
-        # 해당 태스크의 최적 임계값 적용
-        pred_label = apply_thresholds_live(probabilities, OPTIMAL_THRESHOLDS[i])
-        final_labels.append(pred_label.item()) # .item()으로 스칼라 값 추출
+    # for i, pred_logits in enumerate(task_preds):
+    #     print(f"Task {i} pred_logits device: {pred_logits.device}")
+    #     # 확률로 변환
+    #     probabilities = torch.softmax(pred_logits, dim=1).cpu().detach().numpy()
+    #     # 해당 태스크의 최적 임계값 적용
+    #     pred_label = apply_thresholds_live(probabilities, OPTIMAL_THRESHOLDS[i])
+    #     final_labels.append(pred_label.item()) # .item()으로 스칼라 값 추출
+
+    final_labels = [torch.argmax(pred, dim=1).item() for pred in task_preds]
 
     head_status, knee_status, feet_status = final_labels[0], final_labels[1], final_labels[2]
 
