@@ -5,19 +5,17 @@
     <title>모델 성능 비교 분석기</title>
     <style>
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 20px; background-color: #f8f9fa; color: #212529; }
-        .container { max-width: 1200px; margin: auto; background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .container { max-width: 1400px; margin: auto; background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
         .nav-links { margin-bottom: 20px; }
         .nav-links a { margin: 0 10px; text-decoration: none; background-color: #6c757d; color: white; padding: 8px 15px; border-radius: 5px; font-size: 0.9em; }
         h1, h2 { color: #007bff; }
         .form-section { display: flex; gap: 40px; margin-bottom: 30px; }
-        .file-list, .respondent-list { border: 1px solid #dee2e6; padding: 15px; border-radius: 5px; }
+        .file-list, .respondent-list { border: 1px solid #dee2e6; padding: 15px; border-radius: 5px; max-height: 250px; overflow-y: auto; }
         button { font-size: 1.1em; padding: 10px 20px; background-color: #007bff; color: white; border: none; border-radius: 5px; cursor: pointer; }
         table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 0.9em; }
-        th, td { border: 1px solid #dee2e6; padding: 10px; text-align: center; }
-        thead th { background-color: #e9ecef; }
-        .rep-header-row { background-color: #f8f9fa; font-weight: bold; }
-        .accuracy-cell { font-weight: bold; }
-        .total-accuracy { font-size: 1.5em; font-weight: bold; color: #28a745; margin-top: 20px; text-align: center; }
+        th, td { border: 1px solid #dee2e6; padding: 8px; text-align: center; }
+        thead th { background-color: #e9ecef; position: sticky; top: 0; }
+        .total-accuracy { font-size: 1.2em; font-weight: bold; color: #28a745; margin-top: 20px; }
     </style>
 </head>
 <body>
@@ -30,67 +28,72 @@
         <form id="selectionForm" method="POST" action="/analysis">
             <div class="form-section">
                 <div class="file-list">
-                    <h2>1. 모델 결과 파일 선택 (최대 5개)</h2>
-                    {% for file_path in json_files %}
+                    <h2>1. 모델 결과 파일 선택</h2>
+                    {% for file_path in result_files %}
                     <label>
-                        <input type="checkbox" name="json_files" value="{{ file_path }}" {% if file_path in selected_files %}checked{% endif %}>
-                        {{ file_path.split('/')[-1].split('\\')[-1] }} {# 경로에서 파일 이름만 추출 #}
+                        <input type="checkbox" name="result_files" value="{{ file_path }}" {% if file_path in selected_files %}checked{% endif %}>
+                        {{ file_path.split('/')[-1].split('\\')[-1] }}
                     </label><br>
                     {% endfor %}
                 </div>
                 <div class="respondent-list">
-                    <h2>2. 응답자(정답) 선택</h2>
-                    <select name="respondent">
-                        {% for resp in respondents %}
-                        <option value="{{ resp }}" {% if resp == selected_respondent %}selected{% endif %}>{{ resp }}</option>
-                        {% endfor %}
-                    </select>
+                    <h2>2. 응답자 선택</h2>
+                    {% for name in respondents %}
+                    <label>
+                        <input type="checkbox" name="respondents" value="{{ name }}" {% if name in selected_respondents %}checked{% endif %}>
+                        {{ name }}
+                    </label><br>
+                    {% endfor %}
                 </div>
             </div>
             <button type="submit">결과 비교 분석</button>
         </form>
 
-        {% if results %}
+        {% if analysis_results %}
         <hr style="margin: 30px 0;">
         <h2>분석 결과</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>스쿼트 자세</th>
-                    {% for file_name in selected_file_names %}
-                    <th>{{ file_name.replace('.json', '') }}</th>
+        <div class="total-accuracy">
+            <h3>총 정확도</h3>
+            {% for name, acc_percent in accuracies.items() %}
+            <p style="margin: 5px 0;"><strong>{{ name }} vs 모델:</strong> {{ acc_percent }}</p>
+            {% endfor %}
+        </div>
+        <div style="max-height: 600px; overflow-y: auto; margin-top: 15px;">
+            <table>
+                <thead>
+                    <tr>
+                        <th>스쿼트 횟수</th>
+                        <th>자세 부위</th>
+                        <th>모델 예측</th>
+                        {% for resp_header in respondent_headers %}
+                        <th>{{ resp_header }} (정답)</th>
+                        <th>정확도</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in analysis_results %}
+                    <tr>
+                        <td>{{ row['스쿼트 횟수'] }}</td>
+                        <td>{{ row['자세 부위'] }}</td>
+                        <td>{{ row['모델 예측'] }}</td>
+                        {% for resp_header in respondent_headers %}
+                        <td>{{ row[resp_header] }}</td>
+                        <td>{{ row[resp_header + '_정확도'] }}</td>
+                        {% endfor %}
+                    </tr>
                     {% endfor %}
-                    <th>{{ selected_respondent }} (정답)</th>
-                    <th>정답률</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for rep in results %}
-                <tr class="rep-header-row">
-                    <td colspan="{{ 3 + selected_file_names|length }}">스쿼트 {{ rep.rep_num }}회</td>
-                </tr>
-                {% for part_name, part_data in rep.parts.items() %}
-                <tr>
-                    <td>{{ part_name }}</td>
-                    {% for score in part_data.model_scores %}
-                    <td>{{ score }}</td>
-                    {% endfor %}
-                    <td>{{ part_data.respondent_score }}</td>
-                    <td class="accuracy-cell">{{ part_data.accuracy }}%</td>
-                </tr>
-                {% endfor %}
-                {% endfor %}
-            </tbody>
-        </table>
-        <div class="total-accuracy">총 정답률: {{ total_accuracy }}%</div>
+                </tbody>
+            </table>
+        </div>
         {% endif %}
     </div>
     <script>
-        const checkboxes = document.querySelectorAll('input[name="json_files"]');
+        const checkboxes = document.querySelectorAll('input[name="result_files"]');
         const maxAllowed = 5;
         checkboxes.forEach(cb => {
             cb.addEventListener('change', () => {
-                const checkedCount = document.querySelectorAll('input[name="json_files"]:checked').length;
+                const checkedCount = document.querySelectorAll('input[name="result_files"]:checked').length;
                 if (checkedCount > maxAllowed) {
                     alert(`파일은 최대 ${maxAllowed}개까지 선택할 수 있습니다.`);
                     cb.checked = false;

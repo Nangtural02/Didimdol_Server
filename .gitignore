@@ -1,0 +1,54 @@
+# # # 민감한 정보 및 환경 설정 파일 # # #
+# 절대 Git에 올리면 안 되는 파일들입니다.
+credentials.json
+serviceAccountKey.json
+.env
+*.pem
+*.key
+
+# # # Dependency 디렉토리 # # #
+# 각 언어/프레임워크의 의존성 패키지 폴더
+node_modules/
+vendor/
+venv/
+env/
+
+# # # 빌드 및 컴파일 결과물 # # #
+build/
+dist/
+target/
+out/
+
+# # # IDE 및 에디터 설정 파일 # # #
+# Visual Studio Code
+.vscode/
+
+# IntelliJ, PyCharm, WebStorm 등 JetBrains IDE
+.idea/
+
+# Eclipse
+.project
+.classpath
+.settings/
+
+# # # 로그 파일 # # #
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# # # 운영체제(OS) 생성 파일 # # #
+# macOS
+.DS_Store
+._*
+
+# Windows
+Thumbs.db
+
+# # # 기타 # # #
+# Python 캐시
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
