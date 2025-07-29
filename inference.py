@@ -31,28 +31,29 @@ class MultiLSTMFeatureExtractor(nn.Module):
         super(MultiLSTMFeatureExtractor, self).__init__()
         self.lstms = nn.ModuleList([
             nn.LSTM(input_dim, hidden_dim, num_layers, batch_first=True, bidirectional=True)
-            for _ in range(4)
+            for _ in range(3)
         ])
         self.layernorms = nn.ModuleList([
-            nn.LayerNorm(hidden_dim * 2) for _ in range(4)
+            nn.LayerNorm(hidden_dim * 2) for _ in range(3)
         ])
 
     def forward(self, x):
         # x: (batch, seq_len=120, features=50)
         feats = []
-        for i in range(4):
+        for i in range(3):
             _, (h_n, _) = self.lstms[i](x)
             feat = torch.cat((h_n[-2], h_n[-1]), dim=1)
             feat = self.layernorms[i](feat)
             feats.append(feat)  # (batch, hidden*2)
         return feats
+
 # -------------------- Task Classifier --------------------
 class TaskClassifier(nn.Module):
-    def __init__(self, feat_dim=256, num_classes=3):
+    def __init__(self, feat_dim=192, num_classes=3):
         super().__init__()
         # 기존 단일 FC → 두 개의 FC + Dropout
         self.net = nn.Sequential(
-            nn.Linear(feat_dim, feat_dim//2),  # 256 → 128
+            nn.Linear(feat_dim, feat_dim//2), 
             nn.ReLU(),
             nn.Dropout(0.5),
             nn.Linear(feat_dim//2, num_classes)  # 128 → 3
@@ -60,13 +61,13 @@ class TaskClassifier(nn.Module):
 
     def forward(self, feat):
         return self.net(feat)
-    
+
 # -------------------- Domain Classifier --------------------
 class DomainClassifier(nn.Module):
     def __init__(self, feat_dim, num_domains):
         super(DomainClassifier, self).__init__()
         self.net = nn.Sequential(
-            nn.Linear(feat_dim * 4, 256),
+            nn.Linear(feat_dim * 3, 256),
             nn.ReLU(),
             nn.Linear(256, 128),
             nn.ReLU(),
@@ -77,14 +78,14 @@ class DomainClassifier(nn.Module):
     def forward(self, feats):
         concat_feat = torch.cat(feats, dim=1)  # (batch, feat_dim*4)
         return self.net(concat_feat)
-
+    
 # -------------------- SquatPoseModel --------------------
 class SquatPoseModel(nn.Module):
     def __init__(self, feat_dim=256, num_domains=6):
         super(SquatPoseModel, self).__init__()
         self.feature_extractors = MultiLSTMFeatureExtractor(input_dim=50, hidden_dim=feat_dim//2)
         self.task_heads = nn.ModuleList([
-            TaskClassifier(feat_dim, 3) for _ in range(4)
+            TaskClassifier(feat_dim, 3) for _ in range(3)
         ])
         self.domain_classifier = DomainClassifier(feat_dim, num_domains)
 
@@ -94,6 +95,7 @@ class SquatPoseModel(nn.Module):
         rev_feats = [grad_reverse(f, lambd) for f in feats]
         domain_output = self.domain_classifier(rev_feats)
         return task_outputs, domain_output
+
 
 # -------------------- 모델 로드 및 초기 설정 --------------------
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -116,10 +118,9 @@ except Exception as e:
 
 # 1. 튜닝을 통해 찾은 최적의 임계값을 상수로 정의
 OPTIMAL_THRESHOLDS = [
-    {1: 0.8500000000000002, 2: 0.6500000000000001},  # Task 1
-    {1: 0.1, 2: 0.1},  # Task 2
-    {1: 0.30000000000000004, 2: 0.7500000000000002},  # Task 3
-    {1: 0.7000000000000002, 2: 0.8000000000000002},  # Task 4
+    {1: 0.40000000000000013, 2: 0.9000000000000002},  # Task 1
+    {1: 0.3500000000000001, 2: 0.1},  # Task 2
+    {1: 0.1, 2: 0.9500000000000003},  # Task 3
 ]
 
 # 2. 임계값을 적용하는 헬퍼 함수를 추론 코드에 추가
@@ -246,15 +247,15 @@ async def run_ai_inference_placeholder(data_segment: list[SensorData]) -> Infere
         pred_label = apply_thresholds_live(probabilities, OPTIMAL_THRESHOLDS[i])
         final_labels.append(pred_label.item()) # .item()으로 스칼라 값 추출
 
-    head_status, spine_status, knee_status, feet_status = final_labels[0], final_labels[1], final_labels[2], final_labels[3]
+    head_status, knee_status, feet_status = final_labels[0], final_labels[1], final_labels[2]
 
     # 4. 점수 계산 (훈련 코드의 점수 산정 방식과 동일하게 적용)
-    total_status_sum = head_status + spine_status + knee_status + feet_status
+    total_status_sum = head_status + knee_status + feet_status
     score = max(0, 100 - int(total_status_sum * (100 / 8))) # 예시 점수 계산
 
     return InferenceResult(
         count=0,
-        head=head_status, spine=spine_status, knees=knee_status, feet=feet_status,
+        head=head_status, spine=0, knees=knee_status, feet=feet_status,
         totalScore=score
     )
 
