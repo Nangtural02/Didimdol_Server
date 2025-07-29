@@ -1,45 +1,23 @@
-# (★★★ 1번 조치) PyCharm이 끼어들기 전에 그래픽 엔진부터 바꿉니다.
-# 이 코드는 반드시 다른 matplotlib import 보다 먼저 나와야 합니다.
-import matplotlib
-
-matplotlib.use('Agg')
-
 import pandas as pd
 from sklearn.metrics import accuracy_score, confusion_matrix
 import seaborn as sns
 import matplotlib.pyplot as plt
-import matplotlib.font_manager as fm
 from matplotlib.colors import ListedColormap
 from collections import Counter
 import io
 import base64
 import os
 
-
-def setup_korean_font():
-    """
-    (★★★ 2번 조치) Matplotlib의 폰트 캐시를 강제로 다시 만들고, 나눔고딕을 전역 폰트로 설정합니다.
-    """
-    FONT_FILENAME = 'NanumGothic.ttf'
-
-    if not os.path.exists(FONT_FILENAME):
-        print(f"!!! 에러: 폰트 파일 '{FONT_FILENAME}'을 찾을 수 없습니다.")
-        print("스크립트와 같은 폴더에 NanumGothic.ttf 파일을 넣어주세요.")
-        return False
-
-    # 기존 캐시를 무시하고 폰트 목록을 강제로 다시 스캔합니다.
-    fm._load_fontmanager(try_read_cache=False)
-
-    # 전역 폰트 설정
-    plt.rc('font', family='NanumGothic')
-    plt.rc('axes', unicode_minus=False)
-
-    print("✓ 한글 폰트 설정이 완료되었습니다.")
-    return True
+# ==============================================================================
+# 이미지 생성을 위한 Python 내부 폰트 설정 (Windows 기본 '맑은 고딕' 사용)
+# 이 부분은 이제 이미지 파일 내의 한글을 위해 안정적으로 동작합니다.
+# ==============================================================================
+plt.rcParams['font.family'] = 'Malgun Gothic'
+plt.rcParams['axes.unicode_minus'] = False
+# ==============================================================================
 
 
-# --- 이하 데이터 처리 및 시각화 로직은 이전과 거의 동일 ---
-# (단, 폰트 관련 인자는 모두 제거되었습니다. 전역 설정이 알아서 처리합니다.)
+# --- 데이터 처리 및 시각화 함수는 변경할 필요 없습니다 ---
 
 LABEL_TO_CODE = {
     '상체': {'자연스러움': 0, '상체가 앞으로 쏠림(기울어짐)': 1, '상체 뒤로 쏠림(뒤로 넘어질 뻔함)': 2},
@@ -94,7 +72,6 @@ def generate_html_report(human_csv_path, model_csv_path, output_html_path):
         print(f"오류: 파일을 찾을 수 없습니다 - {e.filename}")
         return
 
-    # 데이터 처리
     ground_truth = {
         f'{part}{i}': TEXT_TO_CODE_FLAT.get(Counter(human_df[f'{part}{i}'].dropna()).most_common(1)[0][0], -1) for i in
         range(1, 16) for part in ['상체', '무릎', '발'] if
@@ -108,7 +85,6 @@ def generate_html_report(human_csv_path, model_csv_path, output_html_path):
                 '결과': '정답' if v == model_predictions.get(k) else '오답'} for k, v in ground_truth.items()]
     results_df = pd.DataFrame(results).sort_values(by=['횟수', '부위'])
 
-    # 정확도 계산
     correct_count = len(results_df[results_df['결과'] == '정답'])
     total_count = len(results_df)
     accuracies = {'전체': (correct_count / total_count) if total_count > 0 else 0}
@@ -116,7 +92,6 @@ def generate_html_report(human_csv_path, model_csv_path, output_html_path):
         part_df = results_df[results_df['부위'] == part]
         accuracies[part] = accuracy_score(part_df['정답 (사람)'], part_df['예측 (모델)']) if not part_df.empty else 0
 
-    # 시각화
     correctness_plot_img = plot_correctness_by_rep_to_base64(results_df)
     cm_images = {}
     for part in ['상체', '무릎', '발']:
@@ -127,19 +102,42 @@ def generate_html_report(human_csv_path, model_csv_path, output_html_path):
             cm_images[part] = plot_confusion_matrix_to_base64(y_true_part.tolist(), y_pred_part.tolist(),
                                                               list(LABEL_TO_CODE[part].keys()), part)
 
-    # HTML 생성
+    # ==============================================================================
+    # (★★★ 최종 해결책) HTML 헤더에 Google 웹 폰트를 추가하고 CSS를 수정합니다.
+    # ==============================================================================
     html = f"""
-    <html><head><title>AI 모델 성능 평가 리포트</title>
+    <!DOCTYPE html>
+    <html lang="ko">
+    <head>
+        <meta charset="UTF-8">
+        <title>AI 모델 성능 평가 리포트</title>
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;700&display=swap" rel="stylesheet">
         <style>
-            body {{ font-family: 'Segoe UI', 'Malgun Gothic', sans-serif; margin: 20px; }} h1, h2 {{ color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; }}
+            body {{ 
+                font-family: 'Noto Sans KR', 'Malgun Gothic', sans-serif; 
+                margin: 20px; 
+            }}
+            h1, h2 {{ 
+                color: #333; 
+                border-bottom: 2px solid #eee; 
+                padding-bottom: 10px; 
+                font-weight: 700;
+            }}
+            h3 {{ font-weight: 700; }}
             table {{ border-collapse: collapse; width: 90%; max-width: 800px; margin-top: 20px; margin-bottom: 40px; box-shadow: 0 2px 5px rgba(0,0,0,0.1); }}
-            th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }} th {{ background-color: #f2f2f2; }}
-            .correct {{ color: #28a745; font-weight: bold; }} .incorrect {{ color: #dc3545; font-weight: bold; }}
+            th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }} 
+            th {{ background-color: #f2f2f2; }}
+            .correct {{ color: #28a745; font-weight: bold; }} 
+            .incorrect {{ color: #dc3545; font-weight: bold; }}
             .summary-card {{ background-color: #f8f9fa; border: 1px solid #dee2e6; padding: 20px; border-radius: 8px; margin-bottom: 30px; }}
-            .plot-container {{ text-align: center; margin-bottom: 40px; }} .plot-container img {{ max-width: 100%; height: auto; border: 1px solid #ddd; }}
+            .plot-container {{ text-align: center; margin-bottom: 40px; }} 
+            .plot-container img {{ max-width: 100%; height: auto; border: 1px solid #ddd; }}
             .cm-container {{ display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; }}
         </style>
-    </head><body>
+    </head>
+    <body>
         <h1>AI 모델 성능 평가 리포트</h1>
         <h2>1. 성능 요약</h2>
         <div class="summary-card">
@@ -167,8 +165,10 @@ def generate_html_report(human_csv_path, model_csv_path, output_html_path):
             <tr><th>횟수</th><th>부위</th><th>정답 (사람 Voted)</th><th>예측 (모델)</th><th>결과</th></tr>
             {''.join([f"<tr><td>{row['횟수']}</td><td>{row['부위']}</td><td>{row['정답 (사람)']}</td><td>{row['예측 (모델)']}</td><td class='{'correct' if row['결과'] == '정답' else 'incorrect'}'>{row['결과']}</td></tr>" for _, row in results_df.iterrows()])}
         </table>
-    </body></html>
+    </body>
+    </html>
     """
+    # ==============================================================================
 
     with open(output_html_path, 'w', encoding='utf-8') as f:
         f.write(html)
