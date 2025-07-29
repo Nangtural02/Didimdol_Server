@@ -44,7 +44,6 @@ class InferenceResult:
     """
     count: int
     head: int
-    spine: int
     knees: int
     feet: int
     totalScore: int

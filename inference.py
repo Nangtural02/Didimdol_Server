@@ -221,7 +221,7 @@ async def run_ai_inference_placeholder(data_segment: list[SensorData]) -> Infere
     if model is None:
         print("[Inference] [ERROR] 모델이 로드되지 않아 추론을 건너뜁니다.")
         # 모델 로드 실패 시 기본값 또는 에러 상태를 반환할 수 있습니다.
-        return InferenceResult(count=0, head=9, spine=9, knees=9, feet=9, totalScore=0)
+        return InferenceResult(count=0, head=9, knees=9, feet=9, totalScore=0)
 
     # 1. 데이터 전처리
     input_tensor = preprocess_data(data_segment)
@@ -252,7 +252,7 @@ async def run_ai_inference_placeholder(data_segment: list[SensorData]) -> Infere
 
     return InferenceResult(
         count=0,
-        head=head_status, spine=0, knees=knee_status, feet=feet_status,
+        head=head_status, knees=knee_status, feet=feet_status,
         totalScore=score
     )
 
