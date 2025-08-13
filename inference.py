@@ -85,7 +85,9 @@ class SquatPoseModel(nn.Module):
         super(SquatPoseModel, self).__init__()
         self.feature_extractors = MultiLSTMFeatureExtractor(input_dim=50, hidden_dim=feat_dim//2)
         self.task_heads = nn.ModuleList([
-            TaskClassifier(feat_dim, 3) for _ in range(3)
+            TaskClassifier(feat_dim, 3),
+            TaskClassifier(feat_dim, 2),
+            TaskClassifier(feat_dim, 2)
         ])
         self.domain_classifier = DomainClassifier(feat_dim, num_domains)
 
@@ -104,7 +106,7 @@ MODEL_PATH = "squat_model_best.pth"  # 훈련된 모델 파일
 # 모델 인스턴스 생성 및 가중치 로드
 try:
     print("[Inference] AI 모델 로딩을 시작합니다...")
-    model = SquatPoseModel(feat_dim=192, num_domains=7)
+    model = SquatPoseModel(feat_dim=192, num_domains=8)
     model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
     model.to(DEVICE)
     model.eval()  # 모델을 추론 모드로 설정
@@ -118,9 +120,9 @@ except Exception as e:
 
 # 1. 튜닝을 통해 찾은 최적의 임계값을 상수로 정의
 OPTIMAL_THRESHOLDS = [
-    {1: 0.5000000000000001, 2: 0.30000000000000004},  # Task 1
-    {1: 0.8500000000000002, 2: 0.1},  # Task 2
-    {1: 0.8000000000000002, 2: 0.9500000000000003},  # Task 3
+    {1: 0.8000000000000002, 2: 0.5000000000000001},  # Task 1
+    {1: 0.1},  # Task 2
+    {1: 0.9500000000000003},  # Task 3
 ]
 
 # 2. 임계값을 적용하는 헬퍼 함수를 추론 코드에 추가
