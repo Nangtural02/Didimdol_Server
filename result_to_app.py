@@ -1,7 +1,7 @@
 import asyncio
 import json
 from dataclasses import asdict
-
+from pathlib import Path
 import global_queues
 from data_models import InferenceResult
 
@@ -36,3 +36,28 @@ async def result_emitter():
 
         finally:
             global_queues.RESULT_QUEUE.task_done()
+
+# [추가] 앱 결과 로그 파일 초기화 함수
+def initialize_app_result_log_file(base_filename: str):
+    """앱 결과 저장을 위한 JSON 파일을 초기화하고 전역 변수를 설정합니다."""
+    log_dir = Path("./log")
+    log_dir.mkdir(exist_ok=True)
+    global_queues.is_first_entry_in_results_file = True
+    global_queues.result_log_file_path = log_dir / f"{base_filename}_results.json"
+    global_queues.result_log_file_handler = global_queues.result_log_file_path.open("w", encoding="utf-8")
+    global_queues.result_log_file_handler.write("[\n")
+    print(f"Result logging started to: {global_queues.result_log_file_path}")
+
+# [추가] 앱 결과 로그 파일 종료 함수
+def finalize_app_result_log_file():
+    """앱 결과 JSON 로그 파일을 올바르게 닫고 전역 변수를 초기화합니다."""
+    if global_queues.result_log_file_handler:
+        if not global_queues.is_first_entry_in_results_file:
+            global_queues.result_log_file_handler.seek(global_queues.result_log_file_handler.tell() - 2)
+        global_queues.result_log_file_handler.write("\n]\n")
+        global_queues.result_log_file_handler.close()
+        print(f"Result log file saved: {global_queues.result_log_file_path}")
+        # 전역 변수 초기화
+        global_queues.result_log_file_handler = None
+        global_queues.result_log_file_path = None
+        global_queues.is_first_entry_in_results_file = True

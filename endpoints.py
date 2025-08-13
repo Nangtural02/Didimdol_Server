@@ -13,6 +13,10 @@ import global_queues
 from global_queues import LOGGING_QUEUE, RAW_DATA_QUEUE, sensor_websockets, app_websockets, debug_websockets
 from data_models import SensorData, SquatSegment, InferenceResult
 
+from logger import initialize_raw_log_file, finalize_raw_log_file
+from csv_logger import initialize_csv_log_file, finalize_csv_log_file
+from result_to_app import initialize_app_result_log_file, finalize_app_result_log_file
+
 bp = Blueprint('main_endpoints', __name__)
 
 try:
@@ -218,33 +222,29 @@ async def model_test_ws_handler():
                     continue
 
                 await clear_all_queues(
-                    global_queues.RAW_DATA_QUEUE,
-                    global_queues.SEGMENT_QUEUE,
-                    global_queues.RESULT_QUEUE
+                    global_queues.RAW_DATA_QUEUE, global_queues.LOGGING_QUEUE,
+                    global_queues.SEGMENT_QUEUE, global_queues.RESULT_QUEUE
                 )
                 global_queues.repetition_count = 0
                 global_queues.is_processing_active = True
 
-                log_dir = Path("./log");
-                log_dir.mkdir(exist_ok=True)
-                now_str = dt.datetime.now().strftime("%Y%m%d_%HM%S")
+                now_str = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
                 base_filename = f"model_test_session_{now_str}"
-                global_queues.csv_file_path = log_dir / f"{base_filename}_results.csv"
-                global_queues.csv_file_handler = global_queues.csv_file_path.open("w", encoding="utf-8", newline="")
-                fieldnames = [field.name for field in InferenceResult.__dataclass_fields__.values()]
-                global_queues.csv_writer = csv.DictWriter(global_queues.csv_file_handler, fieldnames=fieldnames)
-                global_queues.csv_writer.writeheader()
 
-                print(f"Model test started. Saving results to: {global_queues.csv_file_path}")
+                # [변경] 함수 호출로 로직 대체 (main.py에 따라 두 로거 모두 초기화)
+                initialize_csv_log_file(base_filename)
+                initialize_raw_log_file(base_filename)
+
                 await client.send(json.dumps({"status": "Overall test started"}))
 
             elif cmd == "stop_overall_test":
                 if not global_queues.is_processing_active: continue
                 global_queues.is_processing_active = False
-                if global_queues.csv_file_handler:
-                    global_queues.csv_file_handler.close()
-                    print(f"CSV log saved to: {global_queues.csv_file_path}")
-                global_queues.csv_file_handler, global_queues.csv_writer, global_queues.csv_file_path = None, None, None
+
+                # [변경] 함수 호출로 로직 대체
+                finalize_csv_log_file()
+                finalize_raw_log_file()
+
                 await client.send(json.dumps({"status": "Overall test stopped"}))
 
             # --- 자동 타이머 기반의 1회 스쿼트 측정 ---
@@ -308,9 +308,12 @@ async def model_test_ws_handler():
     finally:
         if global_queues.is_processing_active:
             global_queues.is_processing_active = False
-            if global_queues.csv_file_handler:
-                global_queues.csv_file_handler.close()
+            # [변경] 함수 호출로 로직 대체
+            finalize_csv_log_file()
+            finalize_raw_log_file()
             print("[Model Test WS] Connection closed, forcefully stopped test.")
+
+
 @bp.websocket('/sensor')
 async def sensor_handler():
     """수신된 데이터를 is_processing_active 상태에 따라 처리하거나 버립니다."""
@@ -365,26 +368,15 @@ async def app_handler():
                     global_queues.repetition_count = 0
                     global_queues.is_processing_active = True
 
-                    log_dir = Path("./log");
-                    log_dir.mkdir(exist_ok=True)
                     now_str = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
                     base_filename = f"{command.get('user', 'unknown')}_{command.get('session', '1')}_{now_str}"
 
-                    # 결과 로그 저장은 모든 모드에서 공통으로 수행
-                    global_queues.is_first_entry_in_results_file = True
-                    global_queues.result_log_file_path = log_dir / f"{base_filename}_results.json"
-                    global_queues.result_log_file_handler = global_queues.result_log_file_path.open("w",
-                                                                                                    encoding="utf-8")
-                    global_queues.result_log_file_handler.write("[\n")
-                    print(f"Result logging started to: {global_queues.result_log_file_path}")
+                    # [변경] result_emitter 모듈의 함수 호출로 대체
+                    initialize_app_result_log_file(base_filename)
 
-                    # ✅ "Normal"과 "serial" 모드에서만 원본 데이터 로깅
                     if global_queues.server_operating_mode in ["Normal", "serial"]:
-                        global_queues.is_first_entry_in_file = True
-                        global_queues.log_file_path = log_dir / f"{base_filename}_raw.json"
-                        global_queues.log_file_handler = global_queues.log_file_path.open("w", encoding="utf-8")
-                        global_queues.log_file_handler.write("[\n")
-                        print(f"Raw data logging started to: {global_queues.log_file_path}")
+                        # [변경] logger 모듈의 함수 호출로 대체
+                        initialize_raw_log_file(base_filename)
                         await client.send(json.dumps({"status": "processing_started"}))
 
                     elif global_queues.server_operating_mode == "replay":
@@ -400,28 +392,15 @@ async def app_handler():
 
                     global_queues.is_processing_active = False
 
-                    # 결과 로그 파일 닫기는 모든 모드에서 공통
-                    if global_queues.result_log_file_handler:
-                        if not global_queues.is_first_entry_in_results_file:
-                            global_queues.result_log_file_handler.seek(global_queues.result_log_file_handler.tell() - 2)
-                        global_queues.result_log_file_handler.write("\n]\n")
-                        global_queues.result_log_file_handler.close()
-                        print(f"Result log file saved: {global_queues.result_log_file_path}")
-                        global_queues.result_log_file_handler = None
-                        global_queues.result_log_file_path = None
+                    # [변경] result_emitter 모듈의 함수 호출로 대체
+                    finalize_app_result_log_file()
 
-                    # ✅ "Normal"과 "serial" 모드에서만 원본 데이터 로그 파일 닫기
                     if global_queues.server_operating_mode in ["Normal", "serial"]:
-                        if global_queues.log_file_handler:
-                            if not global_queues.is_first_entry_in_file:
-                                global_queues.log_file_handler.seek(global_queues.log_file_handler.tell() - 2)
-                            global_queues.log_file_handler.write("\n]\n")
-                            global_queues.log_file_handler.close()
-                            print(f"Raw data log file saved: {global_queues.log_file_path}")
-                            await client.send(
-                                json.dumps({"status": "processing_stopped", "file": str(global_queues.log_file_path)}))
-                        global_queues.log_file_handler = None
-                        global_queues.log_file_path = None
+                        final_path = str(global_queues.log_file_path)
+                        # [변경] logger 모듈의 함수 호출로 대체
+                        finalize_raw_log_file()
+                        await client.send(
+                            json.dumps({"status": "processing_stopped", "file": final_path}))
 
                     elif global_queues.server_operating_mode == "replay":
                         if global_queues.START_REPLAY_EVENT.is_set():
@@ -432,13 +411,14 @@ async def app_handler():
                 print(f"[App WS] Error processing command: {e}")
 
     finally:
-        # 앱 연결이 끊기면 안전하게 처리 중단
+        # [변경] 앱 연결이 끊기면 모든 관련 로거를 안전하게 종료
         if global_queues.is_processing_active:
-            is_processing_active = False
-            if global_queues.log_file_handler:
-                global_queues.log_file_handler.close()
+            global_queues.is_processing_active = False
+            finalize_app_result_log_file()
+            finalize_raw_log_file()
             print(f"[App WS] Client disconnected, forcefully stopped processing.")
         app_websockets.remove(client)
+
 @bp.websocket('/ws_debug')
 async def debug_handler():
     try:
