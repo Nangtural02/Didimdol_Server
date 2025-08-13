@@ -66,9 +66,10 @@ async def startup():
 
     # --- 데이터 처리 및 출력 워커 설정 ---
     if args.model_test:
-        # 모델 테스트 모드에서는 수동 세그멘터와 CSV 로거만 실행
+        # 모델 테스트 모드에서는 수동 세그멘터와 CSV 로거만 실행 + raw data 로거도 실행
         app.add_background_task(manual_repetition_collector)
         app.add_background_task(csv_result_logger)
+        app.add_background_task(file_logging_worker)
     else:
         # 일반 모드에서는 자동 세그멘터, JSON 로거, 앱 결과 전송기 실행
         app.add_background_task(file_logging_worker)
