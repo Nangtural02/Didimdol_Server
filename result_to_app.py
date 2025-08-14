@@ -13,8 +13,8 @@ async def result_emitter():
     """
     print("[Emitter] 결과 전송/저장기 시작됨.")
     while True:
-        result: InferenceResult = await global_queues.RESULT_QUEUE.get()
 
+        result: InferenceResult = await global_queues.RESULT_QUEUE.get()
         try:
             json_result = json.dumps(asdict(result), ensure_ascii=False)
 

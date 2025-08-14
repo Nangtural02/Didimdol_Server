@@ -236,15 +236,15 @@ async def run_ai_inference_placeholder(data_segment: list[SensorData]) -> Infere
 
     # 3. 추론 결과 해석
     final_labels = []
-    # for i, pred_logits in enumerate(task_preds):
-    #     print(f"Task {i} pred_logits device: {pred_logits.device}")
-    #     # 확률로 변환
-    #     probabilities = torch.softmax(pred_logits, dim=1).cpu().detach().numpy()
-    #     # 해당 태스크의 최적 임계값 적용
-    #     pred_label = apply_thresholds_live(probabilities, OPTIMAL_THRESHOLDS[i])
-    #     final_labels.append(pred_label.item()) # .item()으로 스칼라 값 추출
+    for i, pred_logits in enumerate(task_preds):
+        print(f"Task {i} pred_logits device: {pred_logits.device}")
+        # 확률로 변환
+        probabilities = torch.softmax(pred_logits, dim=1).cpu().detach().numpy()
+        # 해당 태스크의 최적 임계값 적용
+        pred_label = apply_thresholds_live(probabilities, OPTIMAL_THRESHOLDS[i])
+        final_labels.append(pred_label.item()) # .item()으로 스칼라 값 추출
 
-    final_labels = [torch.argmax(pred, dim=1).item() for pred in task_preds]
+    #final_labels = [torch.argmax(pred, dim=1).item() for pred in task_preds]
 
     head_status, knee_status, feet_status = final_labels[0], final_labels[1], final_labels[2]
 
