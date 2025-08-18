@@ -13,7 +13,13 @@ async def csv_result_logger():
     """
     print("[CSV Logger] CSV 결과 로거 시작됨.")
     while True:
-        result: InferenceResult = await global_queues.RESULT_QUEUE.get()
+        result = await global_queues.RESULT_QUEUE.get()
+
+        if result is None:
+            print("[CSV Logger] 종료 신호 수신. 로거를 종료합니다.")
+            global_queues.RESULT_QUEUE.task_done()
+            break # 무한 루프 탈출
+
         try:
             if global_queues.is_processing_active and global_queues.csv_writer:
                 # dataclass를 딕셔너리로 변환하여 CSV에 쓰기

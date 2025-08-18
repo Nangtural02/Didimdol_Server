@@ -240,7 +240,8 @@ async def model_test_ws_handler():
             elif cmd == "stop_overall_test":
                 if not global_queues.is_processing_active: continue
                 global_queues.is_processing_active = False
-
+                await global_queues.RESULT_QUEUE.put(None)
+                await global_queues.RESULT_QUEUE.join()
                 # [변경] 함수 호출로 로직 대체
                 finalize_csv_log_file()
                 finalize_raw_log_file()
@@ -308,6 +309,16 @@ async def model_test_ws_handler():
     finally:
         if global_queues.is_processing_active:
             global_queues.is_processing_active = False
+            try:
+                # 즉시 종료 신호를 보냄
+                global_queues.RESULT_QUEUE.put_nowait(None)
+                # global_queues.LOGGING_QUEUE.put_nowait(None)
+
+                # 최대 1초만 기다림 (큐에 데이터가 많아도 강제 종료)
+                await asyncio.wait_for(global_queues.RESULT_QUEUE.join(), timeout=1.0)
+                # await asyncio.wait_for(global_queues.LOGGING_QUEUE.join(), timeout=1.0)
+            except (asyncio.QueueFull, asyncio.TimeoutError) as e:
+                print(f"[Model Test WS] 비정상 종료 중 큐 처리 시간 초과: {e}")
             # [변경] 함수 호출로 로직 대체
             finalize_csv_log_file()
             finalize_raw_log_file()
