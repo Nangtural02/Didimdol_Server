@@ -143,69 +143,65 @@ def apply_thresholds_live(probs, thresholds):
 def preprocess_data(data_segment: list[SensorData]) -> torch.Tensor:
     """
     실시간으로 들어온 센서 데이터를 AI 모델 입력 형식에 맞게 전처리합니다.
+    ('Seq' 순환 문제를 'Timestamp' 기준으로 정렬하여 해결)
     """
     if not data_segment:
-        print("[Inference] [ERROR] 데이터 세그먼트가 비어 있습니다. 전처리를 건너뜁니다.")
-        return torch.zeros(120, 50) # 데이터 없으면 빈 텐서 반환
-    
+        print("[Inference] [ERROR] 데이터 세그먼트가 비어 있습니다.")
+        return torch.zeros(120, 50)
+
     # 학습 시와 동일한 태그 순서 및 특징
     ANCHOR_IDS_IN_ORDER = [0, 1, 2, 3, 4]
     FEATURES_IN_ORDER = ['ax','ay','az','gx','gy','gz','mx','my','mz','Distance']
 
-    # 50ms 간격으로 시간 축을 나누어 시퀀스 생성
-    WINDOW_SIZE = 0.05
-
-    # 1. 전체 데이터의 시작과 끝 시간 찾기
-    start_time = min(d.Timestamp for d in data_segment)
-    end_time = max(d.Timestamp for d in data_segment)
-    duration = end_time - start_time
-
-    # 2. 필요한 시간 창(bin)의 개수 계산
-    num_bins = ceil(duration / WINDOW_SIZE) if duration > 0 else 1
-    
-    # 3. 각 시간 창을 대표하는 빈 딕셔너리 리스트 생성
-    binned_data = [{} for _ in range(num_bins)]
-
-    # 4. 모든 데이터를 타임스탬프에 따라 맞는 시간 창에 배치
+    # 1. 'Seq' 번호를 기준으로 모든 데이터를 그룹화합니다.
+    grouped_by_seq = defaultdict(list)
     for d in data_segment:
-        bin_index = floor((d.Timestamp - start_time) / WINDOW_SIZE)
-        if bin_index >= num_bins: bin_index = num_bins - 1
-        binned_data[bin_index][d.TagAddr] = d
+        grouped_by_seq[d.Seq].append(d)
 
-    # 5. 시간 창 리스트를 순회하며 (N, 50) 형태의 시퀀스 생성 (누락 데이터는 np.nan 처리)
-    processed_sequence = []
-    for time_bin in binned_data:
-        feature_vector_for_one_step = []
+    # 2. (핵심 수정) 각 'Seq' 그룹을 대표하는 최소 Timestamp를 찾아,
+    #    Timestamp를 기준으로 그룹(Seq 번호)들을 정렬합니다.
+    #    이렇게 하면 Seq가 256->1로 순환해도 시간 순서가 보장됩니다.
+    
+    # 각 Seq 그룹과 해당 그룹의 최소 타임스탬프를 튜플로 묶습니다: (seq, min_timestamp)
+    seq_with_timestamp = []
+    for seq, data_list in grouped_by_seq.items():
+        min_timestamp = min(d.Timestamp for d in data_list)
+        seq_with_timestamp.append((seq, min_timestamp))
         
+    # 타임스탬프를 기준으로 정렬합니다.
+    seq_with_timestamp.sort(key=lambda x: x[1])
+    
+    # 정렬된 순서대로 Seq 번호만 다시 추출합니다.
+    sorted_seqs = [seq for seq, _ in seq_with_timestamp]
+
+    # 3. 정렬된 'Seq'를 순회하며 (N, 50) 형태의 시퀀스를 생성합니다.
+    processed_sequence = []
+    for seq in sorted_seqs:
+        feature_vector_for_one_step = []
+        data_in_seq = {d.TagAddr: d for d in grouped_by_seq[seq]}
+
         for anchor_id in ANCHOR_IDS_IN_ORDER:
-            sensor_data = time_bin.get(anchor_id) 
+            sensor_data = data_in_seq.get(anchor_id)
             
             if sensor_data:
-                # 데이터가 있으면 특징 추출
-                features = [
-                    float(getattr(sensor_data, f)) for f in FEATURES_IN_ORDER
-                ]
+                features = [float(getattr(sensor_data, f)) for f in FEATURES_IN_ORDER]
                 feature_vector_for_one_step.extend(features)
             else:
-                # 데이터가 없으면 np.nan으로 10개 채우기 (핵심 변경점)
                 feature_vector_for_one_step.extend([np.nan] * len(FEATURES_IN_ORDER))
         
         processed_sequence.append(feature_vector_for_one_step)
 
-    # 6. Pandas DataFrame을 이용한 선형 보간 (학습 코드와 동일)
+    if not processed_sequence:
+        print("[Inference] [WARN] 처리 후 시퀀스가 비어 있습니다.")
+        return torch.zeros(120, 50)
+
+    # 4. (기존과 동일) Pandas DataFrame을 이용한 선형 보간
     segment_array = np.array(processed_sequence, dtype=np.float32)
     df_segment = pd.DataFrame(segment_array)
-    
-    # 선형 보간
-    df_interp = df_segment.interpolate(method='linear', axis=0, limit_direction='both')
-    
-    # 보간 후에도 남은 NaN은 0으로 채우기
-    df_interp = df_interp.fillna(0)
-    df_interp = df_interp.round(3)
-    
+    df_interp = df_segment.interpolate(method='linear', axis=0, limit_direction='both').fillna(0).round(3)
     final_sequence = df_interp.values
 
-    # 7. 최종 시퀀스를 (120, 50) 크기의 텐서로 변환 (패딩 및 자르기)
+    # 5. (기존과 동일) 최종 시퀀스를 (120, 50) 크기의 텐서로 변환
     x = torch.tensor(final_sequence, dtype=torch.float32)
 
     if x.shape[0] < 120:
